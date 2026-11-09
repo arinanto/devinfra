@@ -171,6 +171,33 @@ routes:
         path:
           full: /mcp/
 
+  # Forgejo MCP, same shape as the browser route above: a pathPrefix match and a
+  # full rewrite onto /mcp, which is the only path forgejo-mcp serves. No
+  # `method:` here for the same reason as above -- streamable HTTP uses POST,
+  # GET and DELETE -- and no trailing slash on the rewrite because that path is
+  # registered exactly.
+  #
+  # No authorization policy on this route, and that is deliberate rather than an
+  # omission. forgejo-mcp authenticates every request with the Authorization
+  # header it is given and forwards that token to Forgejo, so the bearer here is
+  # the client's OWN Forgejo token -- one identity per development environment,
+  # which a single shared DOWNSTREAM_* value cannot express. A `require` on that
+  # header would have to match one fixed token and would break exactly that.
+  # Adding one is therefore not a hardening step: it either replaces per-client
+  # identity with the operator's (FORGEJO_ACCESS_TOKEN) or it locks every client
+  # out. A request without a token is refused by forgejo-mcp itself.
+  - gateways: agent
+    matches:
+      - path:
+          pathPrefix: /mcp/forgejo
+    backends:
+      - host: systemd-forgejomcp:8080
+    name: forgejo-mcp-proxy
+    policies:
+      urlRewrite:
+        path:
+          full: /mcp
+
 # UI settings
 ui:
   gateways: user

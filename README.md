@@ -61,9 +61,9 @@ here.
 | Network | `devnetng.network` | — | Bridge network shared by every container |
 | PostgreSQL | `postgres.container` (image built by `postgisvec.build`) | `localhost/quadlet/postgisvec:latest` | Development database, port 5432 |
 | Valkey | `valkey.container` | `docker.io/valkey/valkey:9-trixie` | Development cache, port 6379 |
-| Agent gateway | `agentgateway.container` | `cr.agentgateway.dev/agentgateway:v1.7.0` | LLM proxy + GitHub/Playwright MCP proxies + admin UI, ports 38080 (UI) and 4000 (API) |
+| Agent gateway | `agentgateway.container` | `cr.agentgateway.dev/agentgateway:v1.7.0` | LLM proxy + GitHub/Playwright/Forgejo MCP proxies + admin UI, ports 38080 (UI) and 4000 (API) |
 | Playwright MCP | `playwrightmcp.container` | `mcr.microsoft.com/playwright/mcp:v0.0.83` | Headless Chromium over MCP, port 8931 |
-| Forgejo MCP | `forgejomcp.container` (image built by `forgejomcp.build`) | `localhost/quadlet/forgejomcp:latest` (built) | MCP server for a Forgejo instance over streamable HTTP, port 8080 |
+| Forgejo MCP | `forgejomcp.container` (image built by `forgejomcp.build`) | `localhost/quadlet/forgejomcp:latest` (built) | MCP server for a Forgejo instance over streamable HTTP, port 8080 inside `devnetng` |
 
 ## Repository layout
 
@@ -143,8 +143,11 @@ gitignored. Fill in the values before starting the stack.
 | `DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN` | Bearer token clients present to the Playwright MCP proxy — random (must match `clients/pi/mcp.json`) |
 
 The three `DOWNSTREAM_*` tokens are shared, not per-client: one value per route,
-rotated in this file and in every client at once. There is no per-environment
-identity on the LLM or GitHub routes yet — see [Roadmap](#roadmap--todo).
+rotated in this file and in every client at once. The proxies have no
+per-environment identity yet — see [Roadmap](#roadmap--todo). The LLM listener is
+the exception: each environment can hold its own virtual key, minted in the
+dashboard, so its spend is attributable and revocable on its own. See [Virtual
+keys](#virtual-keys-llm-access).
 
 `envars/forgejomcp.env`
 
@@ -152,8 +155,8 @@ identity on the LLM or GitHub routes yet — see [Roadmap](#roadmap--todo).
 |---|---|
 | `FORGEJO_URL` | URL of the Forgejo instance the server talks to — contacted at startup; the server exits if it is unreachable |
 | `FORGEJO_ACCESS_TOKEN` | Forgejo access token: Settings → Applications → Access Tokens. Wanted at startup; with the fallback off it is never used to serve a request |
-| `FORGEJO_MCP_ALLOWED_HOSTS` | `Host` names the server answers to, matched exactly with no wildcard. The template covers `systemd-forgejomcp` and both loopback families; a name missing here is a `403` on every request |
-| `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK` | `0` in this stack. `1` would serve a request with no `Authorization` header using `FORGEJO_ACCESS_TOKEN` — which is what devstack does, safely, because it publishes no port. Here the port **is** published, so this stays off; see [Forgejo MCP](#forgejo-mcp) |
+| `FORGEJO_MCP_ALLOWED_HOSTS` | `Host` names the server answers to, matched by host with no wildcard; an entry without a port matches any port, which is why `systemd-forgejomcp` covers the `systemd-forgejomcp:8080` the gateway sends. A name missing here is a `403` on every request |
+| `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK` | `0` in this stack. `1` would serve a request with no `Authorization` header using `FORGEJO_ACCESS_TOKEN` — which is what devstack does, safely, because its only client is a container on `devnetng` that sends no credential. Here the gateway forwards whatever header it was given, so a headerless request served with the operator's token is exactly the identity leak the gateway is meant to prevent; this stays off. See [Forgejo MCP](#forgejo-mcp) |
 
 The admin UI also expects an htpasswd file at
 `data/agentgateway/agwadmins.htpasswd`. There is no template for it, so
@@ -176,6 +179,44 @@ serves requests, it just logs no estimated price and stays out of the cost
 analysis view, so the estimates quietly run low. The same rates appear again in
 `clients/pi/models.json` — that copy is what a client shows you, and it goes
 stale on its own.
+
+### Virtual keys (LLM access)
+
+The LLM listener is keyed, and the template ships it **fail-closed**:
+`llm.policies.apiKey` is `mode: strict` with `keys: []`. Strict means a valid key
+must be present, and an empty list admits none, so a fresh stack refuses every
+`/v1` request with `401` until someone creates a key. `GET /v1/models` answering
+`401` is the listener working, not a fault.
+
+Keys are not in the template and are not edited by hand. They are created at
+runtime in the dashboard, which is why 38080 stays on loopback:
+
+1. Reach the UI over a tunnel — `ssh -N -L 38080:127.0.0.1:38080 <user>@<host>` —
+   and open `http://127.0.0.1:38080`. Log in with the user from
+   `data/agentgateway/agwadmins.htpasswd`.
+2. LLM → Virtual API Keys → one key per development environment. The gateway keeps
+   a hash, not the key, so the raw value is only visible when it is created.
+   In the default file storage the keys are written into
+   `data/agentgateway/config.yaml`, which is gitignored; the committed template
+   keeps `keys: []`, so a fresh checkout still starts closed.
+3. Give that key to the environment's client as a bearer token on
+   `http://<host>:4000/v1`.
+
+`clients/pi/models.json` carries no `apiKey` for the `agentgateway` provider, so Pi
+takes the key from wherever you keep it: `~/.pi/agent/auth.json` via `/login`,
+`--api-key`, or the provider's environment variable. To pin it in that file
+instead, add one line beside `baseUrl` — Pi interpolates `$NAME` at request time:
+
+```json
+"apiKey": "$AGENTGATEWAY_VIRTUAL_KEY"
+```
+
+Never switch the mode to `optional` — the gateway's own default when `mode` is
+omitted — or to `permissive`, and never drop the `apiKey` policy: those admit
+requests with no key at all. And per key, `allowedModels` and `budgets` limit which
+models an environment may call and what it may spend; a budget needs
+`metadata.name` on the key and `config.database.url` in this file, which the
+template already sets.
 
 ## Install
 
@@ -256,15 +297,17 @@ already pointed at loopback:
 
 | File | Goes to | What to change |
 |---|---|---|
-| `models.json` | `~/.pi/agent/models.json` | nothing, unless the models or their rates change |
-| `mcp.json` | `~/.pi/agent/mcp.json` | the three `Bearer <…>` placeholders → the matching `DOWNSTREAM_*` tokens |
+| `models.json` | `~/.pi/agent/models.json` | the provider's virtual key, if you want it in this file rather than `auth.json` — see [Virtual keys](#virtual-keys-llm-access); otherwise nothing, unless the models or their rates change |
+| `mcp.json` | `~/.pi/agent/mcp.json` | the two `DOWNSTREAM_*` `Bearer <…>` placeholders, plus your own Forgejo token on the `forgejo` entry |
 | `web-search.json` | `~/.pi/agent/web-search.json` | `deepseekApiKey` → `DOWNSTREAM_DEEPSEEK_SEARCH_TOKEN` |
 
 `scripts/setup.sh` also copies them to the same directory without the `.example`
 suffix, so the tree always has a fill-in-the-blank copy next to the template.
-They are the client half of the shared-stack story: the provider keys, the GitHub
-PAT and the Forgejo token stay on this host, and a client only ever holds a
-gateway token.
+They are the client half of the shared-stack story: the provider keys and the
+GitHub PAT stay on this host, and a client only ever holds a gateway token — with
+one deliberate exception, the `forgejo` entry, whose token is the client's own
+Forgejo token because that route exists to give each environment its own Forgejo
+identity (see [Forgejo MCP](#forgejo-mcp)).
 
 Two endpoints are *not* on the gateway — PostgreSQL and Valkey — because they are
 protocol servers rather than HTTP and each client connects to them directly. Same
@@ -277,33 +320,43 @@ port numbers: they are what the gateway and the MCP servers expect.
 
 ## Reaching the stack from another machine
 
-Every published port is bound to loopback (`127.0.0.1` and `[::1]`). That is not
-timidity about the network — it is the only thing standing between a dev machine
-and the provider keys, because the LLM listener has no client authentication you
-can rely on: `llm.policies.apiKey` ships empty (`mode: strict`, `keys: []`), so no
-client presents a key. Do not widen it before adding virtual keys and checking
-that a request *without* one is refused.
+Every published port is bound to loopback (`127.0.0.1` and `[::1]`) by default.
+Port 4000 is the one a remote client will usually need widened, and it is safe to
+widen because everything behind it is credential-checked: `/v1` needs a virtual
+key (`llm.policies.apiKey` is `mode: strict`, so a request without one is
+refused — see [Virtual keys](#virtual-keys-llm-access)), and each MCP route above
+it needs its own token. A fresh stack refuses `/v1` until the first key is
+created, which is the listener working as intended rather than a fault.
 
-Three ways to reach it, in ascending order of trust:
+Port 38080 is the deliberate exception that stays on loopback. It is the
+dashboard that mints virtual keys and edits routes, and HTTP basic auth over an
+unencrypted port is the whole of its authentication; reach it through a tunnel.
+
+How to reach 4000, in ascending order of trust:
 
 1. **SSH tunnel** — no change to any unit, and the client keeps the loopback
    URLs above verbatim:
 
    ```bash
-   ssh -N -L 4000:127.0.0.1:4000 -L 8080:127.0.0.1:8080 -L 5432:127.0.0.1:5432 \
+   ssh -N -L 4000:127.0.0.1:4000 -L 5432:127.0.0.1:5432 \
        -L 6379:127.0.0.1:6379 -L 38080:127.0.0.1:38080 devuser@infra-host
    ```
+
+   Every MCP server comes with the 4000 forward, Forgejo included, and 38080
+   rides along for provisioning keys from the dashboard.
 
 2. **Private network** (WireGuard, Tailscale, a lab VLAN) — change the
    `PublishPort=` lines to bind the interface those networks use, e.g.
    `PublishPort=<that-ip>:4000:4000/tcp`, then `systemctl --user daemon-reload`
    and restart the unit. Clients then use `http://<that-ip>:4000` and need no
    tunnel. The address is a property of the host, not of this repository, which
-   is why it is an edit rather than a setting.
+   is why it is an edit rather than a setting. Leave the 38080 lines on loopback
+   and tunnel to the dashboard when you need to create or revoke a key.
 
 3. **A LAN address** — possible, and the same edit, but understand what is being
-   published: an unauthenticated LLM API backed by your provider keys, an
-   unauthenticated browser (if 8931 is published), and a Postgres superuser. This
+   published: a key-gated LLM API backed by your provider keys (safe only while
+   the mode stays `strict`), whatever MCP routes you have tokens for, and — if
+   you widen them too — a Postgres superuser and the basic-auth'd dashboard. This
    is the shape to pick only on a network where every host is already trusted
    with the keys themselves.
 
@@ -314,31 +367,45 @@ token, and why `quadlets/playwrightmcp.container` has no `PublishPort=`.
 
 ### Forgejo MCP
 
-`forgejomcp` is the one service whose exposure decision is not just "loopback or
-not". Two settings have to agree:
+`forgejomcp` is the second service with no `PublishPort=` of its own. Clients
+reach it through the gateway's `/mcp/forgejo` route, so the only host port any
+MCP client needs is 4000. Two things about that route are worth knowing before
+changing it.
 
-- **The fallback is off.** `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0`, so a
-  request with no `Authorization` header is refused with `401` instead of being
-  served with `FORGEJO_ACCESS_TOKEN`. This is the inverse of devstack, which has
-  it on because its only client is a container on `devnetng` that sends no
-  credential. Off is both safer and the better model for several development
-  environments: each one presents its own read-only Forgejo token, and revoking
-  one does not disturb the others.
-- **The port is published on loopback**, which is only safe *because* of the
-  point above. With fallback on, a published port would let any local process act
-  as the operator's Forgejo user. With it off, a local process can only do what
-  its own token allows — which it could do by calling Forgejo directly.
+**The bearer token on this route is the client's own Forgejo token.**
+`forgejo-mcp` reads `Authorization` and forwards that token to Forgejo on every
+request, which is how one identity per development environment is preserved —
+something a single shared `DOWNSTREAM_*` value cannot express. The route therefore
+carries no `authorization` policy of its own, unlike `/mcp/github` and
+`/mcp/playwright`: a `require` on that header would have to match one fixed
+token, and the only fixed token available is the operator's
+(`FORGEJO_ACCESS_TOKEN`, see below), so it would either replace per-client
+identity with the operator's or lock every client out. Requests without a token
+are refused by `forgejo-mcp` itself.
 
-The server matches the `Host` header exactly against `FORGEJO_MCP_ALLOWED_HOSTS`.
-A client behind an SSH tunnel sends `127.0.0.1:8080` and is covered by the
-template; a client on a private network sends its own name and needs that name
-added to the env file, or every request is a `403` naming the header it refused.
+**The fallback stays off.** `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0` means a
+request with no `Authorization` header is refused with `401` instead of being
+served with `FORGEJO_ACCESS_TOKEN`. This is the inverse of devstack, which has it
+on because its only client is a container on `devnetng` that sends no credential.
+With the gateway in front, fallback-on would be worse than it sounds: the gateway
+forwards whatever header it was given, so a headerless request would be served
+as the operator — the one identity the gateway exists to keep away from clients.
 
-`TODO:` front Forgejo through the gateway like GitHub and Playwright, so one port
-and one token model covers every MCP server. It was not done here because the
-gateway's `Host` header behaviour toward a backend is unverified, and
-`forgejomcp` turns a wrong `Host` into a `403` on every request rather than a
-connection error.
+`FORGEJO_MCP_ALLOWED_HOSTS` still governs whether the server answers at all. The
+gateway sends the backend's own name, `systemd-forgejomcp:8080`, which the
+template declares; an entry there without a port matches any port. A name missing
+from the list is a `403` on every request, and the server logs the `Host` it
+refused, so the fix names itself. That check is also the reason to look at this
+list, not at the gateway, when `/mcp/forgejo` answers 403.
+
+That last point is the one unproven link in this route. What the gateway forwards
+as the authority toward a backend is not something this repository can assert
+from documentation: an HTTPS backend demonstrably gets its own name — a request
+to `/mcp/github` with a spoofed `Host` still reaches GitHub — but `forgejomcp` is
+reached over plain HTTP, and that path was not exercised here. If the first call
+through `/mcp/forgejo` answers `403`, read `podman logs systemd-forgejomcp` for
+the `Host` it refused and add that string to `FORGEJO_MCP_ALLOWED_HOSTS`; nothing
+else in the route needs to change.
 
 ## Networking and ports
 
@@ -350,10 +417,10 @@ machine](#reaching-the-stack-from-another-machine) says otherwise.
 |---|---|---|
 | 5432 (PostgreSQL) | `127.0.0.1:5432`, `[::1]:5432` | via tunnel or private network, directly |
 | 6379 (Valkey) | `127.0.0.1:6379`, `[::1]:6379` | via tunnel or private network, directly |
-| 38080 (gateway UI) | `127.0.0.1:38080`, `[::1]:38080` | via tunnel; HTTP basic auth |
-| 4000 (gateway LLM + GitHub/Playwright MCP) | `127.0.0.1:4000`, `[::1]:4000` | via tunnel or private network; **no client auth on the LLM listener** |
-| 8080 (Forgejo MCP) | `127.0.0.1:8080`, `[::1]:8080` | via tunnel or private network; per-request token required |
+| 38080 (gateway UI) | `127.0.0.1:38080`, `[::1]:38080` | **loopback only, by design** — it mints virtual keys and edits routes; reach it through a tunnel |
+| 4000 (gateway LLM + GitHub/Playwright/Forgejo MCP) | `127.0.0.1:4000`, `[::1]:4000` | via tunnel or private network; `/v1` is key-gated (`mode: strict`), MCP routes carry their own tokens |
 | 8931 (Playwright MCP) | not published — gateway route only | through `/mcp/playwright` |
+| 8080 (Forgejo MCP) | not published — gateway route only | through `/mcp/forgejo`, with your own Forgejo token |
 
 Inside the network, the container names are the hostnames: `systemd-postgres`,
 `systemd-valkey`, `systemd-agentgateway`, `systemd-playwrightmcp`,
@@ -364,13 +431,23 @@ Inside the network, the container names are the hostnames: `systemd-postgres`,
 
 ### Verify a fresh install
 
+These run on the host itself, so they address `127.0.0.1`; from a dev machine
+substitute the name you reach the host by. Two of them are meant to be refusals —
+there is no virtual key yet and the dashboard wants basic auth — and the last two
+answer `200` on a real MCP handshake:
+
 ```bash
-curl -sS http://127.0.0.1:4000/v1/models | head          # gateway up, model catalog
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:38080/   # 401 without basic auth
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/v1/models   # 401: no virtual key yet
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:38080/           # 401 without basic auth
 curl -sS -o /dev/null -w '%{http_code}\n' \
     -H "Authorization: Bearer $DOWNSTREAM_GITHUB_MCP_TOKEN" \
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -X POST http://127.0.0.1:4000/mcp/github -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+# Served through /mcp/forgejo, but the token is your Forgejo one, not a gateway token:
+curl -sS -o /dev/null -w '%{http_code}\n' \
+    -H "Authorization: Bearer $FORGEJO_USER_TOKEN" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -X POST http://127.0.0.1:4000/mcp/forgejo -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
 
 `TODO:` the Playwright route is newer than the rest and has not been exercised
@@ -389,7 +466,7 @@ systemd-agentgateway` before suspecting the browser container.
 | Gateway returns 401 | `DOWNSTREAM_*_TOKEN` mismatch between client and `agentgateway.env` |
 | Gateway returns 403/404 on `/mcp/playwright` | The route did not load — check the gateway log for a config error; the whole gateway fails rather than one route |
 | `systemd-forgejomcp` restarts every 30s | `envars/forgejomcp.env` still holds a template placeholder, or `FORGEJO_URL` is unreachable from the container. Check `podman logs systemd-forgejomcp`; the unit exits rather than serving when it cannot reach Forgejo |
-| Forgejo MCP returns 403 | The `Host` header the client sends is not in `FORGEJO_MCP_ALLOWED_HOSTS`; it is matched exactly, with no wildcard |
+| Forgejo MCP returns 403 | The `Host` header the gateway sends (`systemd-forgejomcp:8080`) is not in `FORGEJO_MCP_ALLOWED_HOSTS`; entries match by host with no wildcard, and a 403 logs the header it refused |
 | Forgejo MCP returns 401 | `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0` and the request carried no `Authorization` header — that is the intended answer, send your own token |
 | Unit starts at boot but nothing answers | The user manager is not lingering: `loginctl enable-linger $USER` |
 | Screenshots not visible on this host | They are written to `data/playwrightmcp/` on the *infrastructure* host, owned by a mapped subuid; copy them across, they are world-readable |
@@ -400,14 +477,23 @@ systemd-agentgateway` before suspecting the browser container.
 
 - `data/`, `envars/` and `clients/` are gitignored apart from `*.example`
   templates, so no tracked file ever holds a secret.
-- Every published port is on loopback. The LLM listener has no client
-  authentication: treat "can open a socket to 4000" as "can spend the provider
-  keys".
+- Every published port is on loopback by default, and 38080 stays on loopback:
+  it can mint virtual keys and rewrite routes, and HTTP basic auth is all it has.
+- The LLM listener is fail-closed, not open: `mode: strict` with an empty key list
+  admits nobody until a virtual key exists, and then admits only valid keys. What
+  would spend your provider keys for anyone who asks is `mode: optional` (the
+  gateway's default when `mode` is omitted) or `permissive`, or no `apiKey`
+  policy at all.
 - The gateway admin UI is protected by HTTP basic auth; keep it on loopback.
 - `GITHUB_MCP_PAT` is intended to be read-only; write tools will fail with 403.
 - `FORGEJO_ACCESS_TOKEN` is not served to headerless requests here
-  (`FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0`). Publishing the fallback-on
-  combination would hand the operator's Forgejo identity to any local process.
+  (`FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0`), and that matters more now than
+  it did when the MCP port was published: the gateway forwards whatever
+  `Authorization` header it was given, so fallback-on would hand the operator's
+  Forgejo identity to any client that reached the route.
+- Forgejo MCP is not published either, and its route adds no credential of its
+  own — the token on it is the client's Forgejo token. Anyone who can reach
+  port 4000 can reach the server, and gets `401` without a token.
 - Playwright is not published: anything on `devnetng` that can reach 8931 can
   drive a browser with whatever credentials that browser can hold, and the
   container runs with `--allowed-hosts "*"`. It is served over the gateway so a
@@ -419,10 +505,14 @@ systemd-agentgateway` before suspecting the browser container.
 
 ## Roadmap / TODO
 
-- [ ] Virtual keys on the LLM listener, so 4000 can be published deliberately
-      (and so cost per development environment can be seen)
+- [ ] Virtual keys as a tracked procedure rather than a dashboard step: which key
+      belongs to which environment, and when it was last rotated (minting them
+      works today — see [Virtual keys](#virtual-keys-llm-access))
 - [ ] Per-client `DOWNSTREAM_*` tokens instead of one shared value per route
-- [ ] Forgejo through the gateway (`/mcp/forgejo`), replacing the published 8080
+- [ ] A gateway-side credential for `/mcp/forgejo`, if one is ever wanted: it has
+      to arrive in a header of its own (checked by `authorization`, then removed
+      by `requestHeaderModifier`), because `Authorization` on that route belongs
+      to the client's Forgejo identity
 - [ ] Per-host overrides — today a private-network bind means editing the unit
 - [ ] `Makefile` / `justfile` for build, install and teardown
 - [ ] Validate envars before starting units

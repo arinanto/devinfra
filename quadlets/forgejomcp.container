@@ -1,27 +1,31 @@
 # Podman Quadlet for the Forgejo MCP server.
 #
 # Quadlet names the container systemd-forgejomcp (no ContainerName=), and that
-# name is the Host header a client inside devnetng sends. It has to appear in
-# FORGEJO_MCP_ALLOWED_HOSTS or the request is refused with 403: the server
-# matches the Host header exactly, with no wildcard, and a network-reachable bind
-# refuses to start at all without a list.
+# name is the Host header the gateway sends when it proxies to it. It has to
+# appear in FORGEJO_MCP_ALLOWED_HOSTS or the request is refused with 403: the
+# server matches the Host header exactly, with no wildcard, and a
+# network-reachable bind refuses to start at all without a list.
 #
-# Published on loopback, unlike devstack -- where the port was deliberately left
-# unpublished. The reason that was safe to reverse is the env file, not the
-# network: FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK is OFF here, so this server
-# never acts with a credential a request did not present. A local process that
-# calls it can only do what its own Forgejo token allows, which is what it could
-# do by calling Forgejo directly. In devstack the fallback was ON, and there the
-# port genuinely had to stay closed: it would have handed the operator's Forgejo
-# identity to every process on the host.
+# Nothing is published, same as playwrightmcp. Clients reach this server through
+# the gateway's /mcp/forgejo route on port 4000
+# (data/agentgateway/config.yaml.example, route forgejo-mcp-proxy), so every
+# MCP server in this stack is one port and one firewall rule.
 #
-# The two settings are a pair. Publishing this port while setting
-# FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=1 would give every local process the
-# operator's Forgejo account. Publish only with the fallback off.
+# Through the gateway, the bearer token a client sends is still ITS OWN Forgejo
+# token, not a gateway token: this server reads the Authorization header and
+# passes it to Forgejo, which is the only way to keep one identity per
+# development environment. The gateway route therefore adds no credential of its
+# own, and what keeps the pair safe is
+# FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0 -- with the fallback ON, a request
+# that carries no token would be served with FORGEJO_ACCESS_TOKEN, and the
+# gateway would be forwarding it to anyone. The fallback stays off whatever the
+# exposure.
 #
-# Clients on another machine arrive over loopback (an SSH tunnel) or over a
-# private network. Either way the Host header they send has to be listed in
-# FORGEJO_MCP_ALLOWED_HOSTS -- see the env template, and README "Forgejo MCP".
+# FORGEJO_MCP_ALLOWED_HOSTS still matters: it decides which Host this server
+# answers to, and a name missing from it is a 403 on every request. Through the
+# gateway the Host is the backend's own name (systemd-forgejomcp:8080), which the
+# env template already declares -- see the env template, and README
+# "Forgejo MCP".
 #
 # No [Unit] dependency ordering against the rest of the stack: this unit dials
 # its Forgejo instance at startup and exits non-zero when it cannot reach it, so
@@ -39,8 +43,6 @@ Description=Forgejo MCP server over streamable HTTP
 Image=forgejomcp.build
 EnvironmentFile=%h/Containers/devinfra/envars/forgejomcp.env
 Network=devnetng.network
-PublishPort=127.0.0.1:8080:8080/tcp
-PublishPort=[::1]:8080:8080/tcp
 
 [Install]
 WantedBy=default.target

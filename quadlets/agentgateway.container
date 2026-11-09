@@ -9,14 +9,20 @@
 # loopback is the floor and a tunnel or a private network is how it gets further
 # (see README, "Reaching the stack from another machine").
 #
-# Loopback-only is load-bearing, not timid: the LLM listener has no enforced
-# client auth (`llm.policies.apiKey` is `mode: strict` with `keys: []`, and a
-# strict policy with no keys configured is what the template ships). Anything
-# that can reach this port can spend the provider keys in envars/agentgateway.env.
-# Do not widen these two lines without adding virtual keys first.
+# Loopback is the default, not a load-bearing wall: the LLM listener is fail-closed
+# (`llm.policies.apiKey` is `mode: strict` with `keys: []`, and strict with an
+# empty key list refuses every request until virtual keys are created in the
+# dashboard), and every MCP route above this port carries its own token. So
+# widening 4000 to a private interface is a supported edit -- see README,
+# "Reaching the stack from another machine". What must never change is the mode:
+# `optional` (the gateway's default when omitted) or `permissive` admits keyless
+# requests, and then anything that can reach this port can spend the provider
+# keys in envars/agentgateway.env.
 #
 # The `user` gateway (38080) is the admin UI, behind HTTP basic auth from
-# data/agentgateway/agwadmins.htpasswd.
+# data/agentgateway/agwadmins.htpasswd. It stays on loopback in every shape: it is
+# what mints those virtual keys and edits the routes, so publishing it would hand
+# out the keys the LLM listener is gated with.
 
 [Unit]
 Description=Agent gateway: LLM proxy, MCP proxies, admin UI

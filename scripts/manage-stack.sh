@@ -124,10 +124,11 @@ _printing_endpoints() {
 on this host (loopback):
   PostgreSQL          postgresql://postgres:<password>@127.0.0.1:5432/postgres
   Valkey              redis://127.0.0.1:6379
-  Gateway admin UI    http://127.0.0.1:38080 (HTTP basic auth)
-  Gateway API         http://127.0.0.1:4000/v1        (LLM, no client auth)
+  Gateway admin UI    http://127.0.0.1:38080 (HTTP basic auth; loopback only -- it mints virtual keys)
+  Gateway API         http://127.0.0.1:4000/v1        (LLM, needs a virtual key: mode strict)
   GitHub MCP proxy    http://127.0.0.1:4000/mcp/github   (Bearer DOWNSTREAM_GITHUB_MCP_TOKEN)
   Playwright MCP      http://127.0.0.1:4000/mcp/playwright (Bearer DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN)
+  Forgejo MCP         http://127.0.0.1:4000/mcp/forgejo  (Bearer <your own Forgejo token>)
 
 on devnetng, container to container only (not published):
   Postgres  systemd-postgres:5432      Valkey  systemd-valkey:6379
