@@ -1,0 +1,13 @@
+{
+  "searchRouting": {
+    "providers": ["exa", "deepseek"],
+    "fallbackOn": ["transient", "quota", "network", "invalid-response", "empty"]
+  },
+  "deepseekApiKey": "<DOWNSTREAM_DEEPSEEK_SEARCH_TOKEN from envars/agentgateway.env>",
+  "deepseekBaseUrl": "http://127.0.0.1:4000/proxy/deepseek",
+  "allowHttpBaseUrls": true,
+  "fetchRouting": {
+    "providers": ["http", "jina", "deepseek"],
+    "allowRemoteHostedProviders": true
+  }
+}

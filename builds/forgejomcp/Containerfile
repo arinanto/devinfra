@@ -1,0 +1,99 @@
+# forgejo-mcp -- MCP server for Forgejo, packaged from the upstream prebuilt
+# release bundles.
+#
+# Upstream ships one directory per architecture,
+#
+#   forgejo-mcp_<version>_linux_<arch>/{forgejo-mcp,README.md,LICENSE}
+#
+# and this build installs the one matching the target platform. Nothing is
+# compiled here: the binary is CGO-free static Go, so it only needs a libc-free
+# runtime and a CA bundle. Upstream's forge is behind Anubis, so the bundles are
+# fetched on the host and dropped into ./binaries; this Containerfile never
+# reaches the network.
+
+# --- pick the release bundle for the target architecture ---------------------
+#
+# TARGETARCH is set by buildx, and by `podman build --platform` / `--arch`
+# (buildah >= 1.37). A plain native `podman build` -- which is what a Quadlet
+# .build unit runs -- sets no platform build args at all (containers/podman
+# #27158), so the fallback asks dpkg for the architecture of the base image.
+# That cannot pick the wrong bundle: without a --platform the base image is the
+# host's own architecture. Both dpkg and the release bundles spell it the same
+# way, amd64 and arm64.
+#
+# The failure mode for a missing bundle is at build time, with the available
+# names printed, rather than a statically-wrong image later.
+FROM docker.io/library/debian:trixie-slim AS release
+
+ARG FORGEJO_MCP_VERSION=3.4.0
+ARG TARGETARCH
+
+COPY binaries/ /opt/binaries/
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    src="/opt/binaries/forgejo-mcp_${FORGEJO_MCP_VERSION}_linux_${arch}"; \
+    if [ ! -x "$src/forgejo-mcp" ]; then \
+        printf 'no release bundle for linux/%s under %s\n' "$arch" "$src" >&2; \
+        printf 'bundles present:\n' >&2; \
+        ls -1 /opt/binaries >&2; \
+        exit 1; \
+    fi; \
+    install -D -m 0755 "$src/forgejo-mcp" /out/forgejo-mcp; \
+    install -D -m 0644 "$src/LICENSE" /out/LICENSE
+
+# --- runtime -----------------------------------------------------------------
+FROM docker.io/library/debian:trixie-slim
+
+# ca-certificates: the server talks TLS to the Forgejo instance.
+# catatonit: PID 1, so the server is not. The server installs no SIGTERM handler
+# (there is no signal.Notify anywhere in it), and the kernel discards a fatal
+# signal sent to PID 1 unless something handles it -- so as PID 1 every
+# `podman stop` would wait out TimeoutStopSec and then SIGKILL. catatonit
+# catches the signal and forwards it to a child, where the default action
+# applies again and the process exits.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends catatonit ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=release /out/forgejo-mcp /usr/local/bin/forgejo-mcp
+# GPL-3.0-or-later: keep the licence next to the binary it covers.
+COPY --from=release /out/LICENSE /usr/share/licenses/forgejo-mcp/LICENSE
+
+# A numeric UID, deliberately without a passwd entry: the server needs no home
+# directory and reads nothing from /etc/passwd. 10001 stays clear of the base
+# image's own system accounts. Mount anything it must read with `:U,` so podman
+# maps the ownership rather than the image baking a user in.
+USER 10001:10001
+
+# Streamable HTTP is the only transport that makes sense from outside the
+# container, so it is the default. 0.0.0.0 is required: the default bind is
+# loopback, which inside a container is reachable by nothing outside it.
+#
+# --allowed-hosts is NOT set here, on purpose. The server refuses to start on a
+# network-reachable address unless the Host names clients will use are declared,
+# and no list this file could bake would be right: the names depend on the
+# container name on devnetng, which belongs to the unit, not the image. Passing
+# the flag here would also shadow FORGEJO_MCP_ALLOWED_HOSTS (an explicit flag
+# always wins over its environment variable), making the variable silently
+# useless. Set it in the unit's EnvironmentFile instead, declaring the names
+# clients actually resolve -- the Host header is matched exactly, so there is no
+# wildcard, and a missed name shows up as a 403 on every request:
+#
+#   FORGEJO_MCP_ALLOWED_HOSTS=systemd-forgejomcp,localhost,127.0.0.1
+#
+# FORGEJO_URL and FORGEJO_ACCESS_TOKEN are required all the same. On sse/http
+# every request must carry its own Authorization header unless
+# --allow-operator-token-fallback is passed, which hands the operator's Forgejo
+# credential to anyone who can reach the port -- see README.md upstream before
+# turning it on.
+#
+# No HEALTHCHECK: /mcp answers a GET only with a stream, and a POST only with an
+# MCP handshake; both need the caller's Authorization header. What is left is a
+# TCP check, which cannot tell a working server from one refusing every request
+# (a Host header outside the allow-list is a 403). Read the log instead: a
+# network-reachable bind is announced, and every refusal is logged.
+EXPOSE 8080
+
+ENTRYPOINT ["catatonit", "--", "/usr/local/bin/forgejo-mcp"]
+CMD ["--transport", "http", "--host", "0.0.0.0", "--http-port", "8080"]

@@ -1,0 +1,13 @@
+FROM docker.io/library/postgres:18-trixie
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    catatonit \
+    postgresql-18-postgis-3 \
+    postgresql-18-postgis-3-scripts \
+    postgresql-18-pgvector \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["catatonit", "--", "docker-entrypoint.sh"]
+
+CMD ["postgres"]

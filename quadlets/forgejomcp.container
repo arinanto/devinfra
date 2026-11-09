@@ -1,0 +1,50 @@
+# Podman Quadlet for the Forgejo MCP server.
+#
+# Quadlet names the container systemd-forgejomcp (no ContainerName=), and that
+# name is the Host header a client inside devnetng sends. It has to appear in
+# FORGEJO_MCP_ALLOWED_HOSTS or the request is refused with 403: the server
+# matches the Host header exactly, with no wildcard, and a network-reachable bind
+# refuses to start at all without a list.
+#
+# Published on loopback, unlike devstack -- where the port was deliberately left
+# unpublished. The reason that was safe to reverse is the env file, not the
+# network: FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK is OFF here, so this server
+# never acts with a credential a request did not present. A local process that
+# calls it can only do what its own Forgejo token allows, which is what it could
+# do by calling Forgejo directly. In devstack the fallback was ON, and there the
+# port genuinely had to stay closed: it would have handed the operator's Forgejo
+# identity to every process on the host.
+#
+# The two settings are a pair. Publishing this port while setting
+# FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=1 would give every local process the
+# operator's Forgejo account. Publish only with the fallback off.
+#
+# Clients on another machine arrive over loopback (an SSH tunnel) or over a
+# private network. Either way the Host header they send has to be listed in
+# FORGEJO_MCP_ALLOWED_HOSTS -- see the env template, and README "Forgejo MCP".
+#
+# No [Unit] dependency ordering against the rest of the stack: this unit dials
+# its Forgejo instance at startup and exits non-zero when it cannot reach it, so
+# under the shipped envars/forgejomcp.env template it restarts every RestartSec
+# until FORGEJO_URL and FORGEJO_ACCESS_TOKEN are filled in. That is the intended
+# failure mode and it is isolated: nothing else in the stack wants this unit.
+#
+# No RunInit=: the image already runs catatonit as PID 1, so `podman --init`
+# would put a second init ahead of it.
+
+[Unit]
+Description=Forgejo MCP server over streamable HTTP
+
+[Container]
+Image=forgejomcp.build
+EnvironmentFile=%h/Containers/devinfra/envars/forgejomcp.env
+Network=devnetng.network
+PublishPort=127.0.0.1:8080:8080/tcp
+PublishPort=[::1]:8080:8080/tcp
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Restart=on-failure
+RestartSec=30s

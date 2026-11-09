@@ -1,0 +1,182 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+config:
+  database:
+    url: sqlite:///config/primary.db
+  logging:
+    database:
+      url: sqlite:///config/telemetry.db
+  session:
+    key: $AGENTGW_SESSION_KEY
+  modelCatalog:
+  - inline:
+      providers:
+        deepseek:
+          models:
+            deepseek-flash:
+              rates:
+                input: '0.3'
+                output: '1.2'
+                cacheRead: '0.006'
+        zai:
+          models:
+            glm-5.3:
+              rates:
+                input: '1.4'
+                output: '4.4'
+                cacheRead: '0.26'
+        openrouter:
+          models:
+            moonshotai/kimi-k3.1-pro:
+              rates:
+                input: '2'
+                output: '10'
+                cacheRead: '0.2'
+# Gateway settings
+gateways:
+  user:
+    port: 38080
+    protocol: HTTP
+  agent:
+    port: 4000
+    protocol: HTTP
+
+# LLM configs
+llm:
+  gateways: agent
+  providers:
+  - provider: deepseek
+    params:
+      apiKey: $DEEPSEEK_API_KEY
+    name: deepseek
+  - provider:
+      custom:
+        formats:
+        - type: completions
+    params:
+      apiKey: $ZAI_API_KEY
+      baseUrl: https://api.z.ai/api/paas/v4
+    name: zai
+  - provider: openrouter
+    params:
+      apiKey: $OPENROUTER_API_KEY
+    name: openrouter
+  models:
+  - name: deepseek/deepseek-flash
+    provider:
+      reference: deepseek
+    params:
+      model: deepseek-flash
+  - name: zai/glm-5.3
+    provider:
+      reference: zai
+    params:
+      model: glm-5.3
+  - params:
+      model: moonshotai/kimi-k3.1-pro
+    name: moonshotai/kimi-k3.1-pro
+    provider:
+      reference: openrouter
+  policies:
+    apiKey:
+      mode: strict
+      keys: []
+
+    guardrails:
+      request:
+      - regex:
+          action: audit
+          rules:
+          - builtin: caSin
+          - builtin: ssn
+          - builtin: creditCard
+          - builtin: phoneNumber
+          - builtin: email
+routes:
+  - gateways: agent
+    matches:
+      - path:
+          pathPrefix: /proxy/deepseek
+        method: POST
+    backends:
+      - host: api.deepseek.com:443
+        policies:
+          backendTLS:
+            insecure: false
+    name: deepseek-tools-api-proxy
+    policies:
+      authorization:
+        rules:
+          - require: |-
+              "authorization" in request.headers &&
+              request.headers.authorization == "Bearer $DOWNSTREAM_DEEPSEEK_SEARCH_TOKEN"
+          - require: |-
+              request.path == "/proxy/deepseek/v1/tools/search" ||
+              request.path == "/proxy/deepseek/v1/tools/fetch"
+      requestHeaderModifier:
+        set:
+          authorization: Bearer $DEEPSEEK_API_KEY
+      urlRewrite:
+        path:
+          prefix: /
+  - gateways: agent
+    matches:
+      - path:
+          exact: /mcp/github
+        method: POST
+    backends:
+      - host: api.githubcopilot.com:443
+        policies:
+          backendTLS:
+            insecure: false
+    name: github-mcp-proxy
+    policies:
+      authorization:
+        rules:
+          - require: |-
+              "authorization" in request.headers &&
+              request.headers.authorization == "Bearer $DOWNSTREAM_GITHUB_MCP_TOKEN"
+      requestHeaderModifier:
+        set:
+          authorization: Bearer $GITHUB_MCP_PAT
+      urlRewrite:
+        path:
+          full: /mcp/
+
+  # The browser half of a dev environment, on the same port as everything else.
+  # Playwright MCP publishes no host port of its own: an unauthenticated browser
+  # on loopback is one any local process can drive, and the gateway already
+  # carries a bearer token for every other remote service.
+  #
+  # No `method:` here on purpose. GitHub MCP only ever posts, but streamable HTTP
+  # uses POST to send, GET to open the server->client stream and DELETE to end
+  # the session, so a POST-only match would break the latter two.
+  #
+  # `urlRewrite: full: /mcp/` collapses the client's /mcp/playwright (or
+  # /mcp/playwright/<anything>) onto the path the browser server actually
+  # serves. Point clients at http://<this host>:4000/mcp/playwright.
+  - gateways: agent
+    matches:
+      - path:
+          pathPrefix: /mcp/playwright
+    backends:
+      - host: systemd-playwrightmcp:8931
+    name: playwright-mcp-proxy
+    policies:
+      authorization:
+        rules:
+          - require: |-
+              "authorization" in request.headers &&
+              request.headers.authorization == "Bearer $DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN"
+      urlRewrite:
+        path:
+          full: /mcp/
+
+# UI settings
+ui:
+  gateways: user
+  policies:
+    basicAuth:
+      htpasswd:
+        file: /config/agwadmins.htpasswd
+      mode: strict
+      realm: agentgateway

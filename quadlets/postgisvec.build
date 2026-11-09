@@ -1,0 +1,7 @@
+[Unit]
+Description=PostgreSQL + PostGIS + pgvector container image
+
+[Build]
+ImageTag=localhost/quadlet/postgisvec:latest
+SetWorkingDirectory=%h/Containers/devinfra/builds/postgisvec
+File=Containerfile

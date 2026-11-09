@@ -1,0 +1,94 @@
+{
+  "providers": {
+    "agentgateway": {
+      "baseUrl": "http://127.0.0.1:4000/v1",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "deepseek/deepseek-flash",
+          "name": "DeepSeek 4.1 Flash",
+          "reasoning": true,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStore": false,
+            "supportsReasoningEffort": true,
+          },
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 0.30,
+            "cacheRead": 0.006,
+            "cacheWrite": 0.0,
+            "output": 1.20
+          }
+        },
+        {
+          "id": "zai/glm-5.3",
+          "name": "GLM 5.3",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          },
+          "input": ["text"],
+          "contextWindow": 1000000,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "zai"
+          },
+          "cost": {
+            "input": 1.40,
+            "cacheRead": 0.26,
+            "cacheWrite": 0.0,
+            "output": 4.40
+          }
+        },
+        {
+          "id": "moonshotai/kimi-k3.1-pro",
+          "name": "Kimi K3.1 Pro",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens"
+          },
+          "cost": {
+            "input": 2.00,
+            "cacheRead": 0.20,
+            "cacheWrite": 2.00,
+            "output": 10.00
+          }
+        }
+      ]
+    }
+  }
+}

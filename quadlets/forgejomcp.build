@@ -1,0 +1,22 @@
+# Podman Quadlet for building the forgejo-mcp image.
+#
+# The build context is builds/forgejomcp, which must already hold the upstream
+# release bundles under binaries/: the Containerfile copies the bundle that
+# matches the target architecture, and fails -- listing what it did find -- when
+# that one is absent. The bundles are release object code and are not tracked,
+# so unpack them there first:
+#
+#   binaries/forgejo-mcp_<version>_linux_amd64/
+#   binaries/forgejo-mcp_<version>_linux_arm64/
+#
+# See THIRD-PARTY.md for the version, the licence, and why the bundles stay out
+# of history. The generated service is oneshot, so rebuilding is
+# `systemctl --user restart forgejomcp-build.service`.
+
+[Unit]
+Description=Debian + forgejo-mcp (upstream release binary) image
+
+[Build]
+ImageTag=localhost/quadlet/forgejomcp:latest
+SetWorkingDirectory=%h/Containers/devinfra/builds/forgejomcp
+File=Containerfile

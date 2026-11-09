@@ -1,0 +1,5 @@
+[Unit]
+Description=Next generation agentic containers network
+
+[Network]
+Driver=bridge

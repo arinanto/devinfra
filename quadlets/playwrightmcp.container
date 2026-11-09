@@ -1,0 +1,57 @@
+# Podman Quadlet for the Playwright MCP browser server.
+# Converted from browsermcp.sh.
+#
+# Install as:
+#   rootless: ~/.config/containers/systemd/playwrightmcp.container
+#   rootful:  /etc/containers/systemd/playwrightmcp.container
+# Then:
+#   systemctl --user daemon-reload && systemctl --user start playwrightmcp.service
+#
+# Quadlet names the container itself: systemd-playwrightmcp (no ContainerName= /
+# --name), and adds --rm / --replace automatically. Inside devnetng, clients
+# reach it at http://systemd-playwrightmcp:8931/mcp. From outside the network it
+# is reached through the agent gateway's /mcp/playwright route instead -- there
+# is no PublishPort= here, and adding one would put an unauthenticated browser
+# on the host's loopback (see README, "Reaching the stack from another machine").
+#
+# Screenshots and downloads land in data/playwrightmcp/ on the host, which is
+# where the dev environment reads them from: there is no fakevm /mnt/playwrightmcp
+# mount to hand them over in this stack. `:U` maps the files to the container
+# user, so files arrive owned by a mapped subuid; they are world-readable, which
+# is what makes them readable by the host user without any extra mount.
+
+[Unit]
+Description=Playwright MCP browser server (headless Chromium)
+# Give up after 3 failed starts inside a 10 minute window. The interval has to
+# be wider than TimeoutStartSec, otherwise each retry falls outside the window
+# and the burst limit never trips.
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Container]
+Image=mcr.microsoft.com/playwright/mcp:v0.0.83
+Network=devnetng.network
+RunInit=true
+Volume=%h/Containers/devinfra/data/playwrightmcp:/mnt/playwrightmcp:U,z
+Entrypoint=node
+Exec=/app/cli.js \
+    --headless --browser chromium \
+    --sandbox --isolated \
+    --image-responses omit \
+    --viewport-size 1920x1080 \
+    --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36" \
+    --output-dir /mnt/playwrightmcp \
+    --file-paths absolute \
+    --output-max-size 536870912 \
+    --port 8931 \
+    --host 0.0.0.0 \
+    --allowed-hosts "*" \
+    --idle-timeout 1800000
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Restart=on-failure
+# Startup (incl. first-run image pull) gets 90s per attempt.
+TimeoutStartSec=90

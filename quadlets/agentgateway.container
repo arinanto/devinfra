@@ -1,0 +1,44 @@
+# Podman Quadlet for the agent gateway.
+#
+# The gateway is the one thing every development environment has to reach, so in
+# this stack it is also the one unit whose agent listener is published: the
+# `agent` gateway (port 4000) carries the OpenAI-compatible LLM API, the
+# /proxy/deepseek route and the MCP proxies. devstack kept it network-internal
+# because its only client was the fakevm on devnetng; here the client is a
+# whatever-machine dev environment that cannot resolve devnetng names, so
+# loopback is the floor and a tunnel or a private network is how it gets further
+# (see README, "Reaching the stack from another machine").
+#
+# Loopback-only is load-bearing, not timid: the LLM listener has no enforced
+# client auth (`llm.policies.apiKey` is `mode: strict` with `keys: []`, and a
+# strict policy with no keys configured is what the template ships). Anything
+# that can reach this port can spend the provider keys in envars/agentgateway.env.
+# Do not widen these two lines without adding virtual keys first.
+#
+# The `user` gateway (38080) is the admin UI, behind HTTP basic auth from
+# data/agentgateway/agwadmins.htpasswd.
+
+[Unit]
+Description=Agent gateway: LLM proxy, MCP proxies, admin UI
+
+[Container]
+Image=cr.agentgateway.dev/agentgateway:v1.7.0
+RunInit=true
+EnvironmentFile=%h/Containers/devinfra/envars/agentgateway.env
+Volume=%h/Containers/devinfra/data/agentgateway:/config:U,Z
+Network=devnetng.network
+PublishPort=127.0.0.1:38080:38080/tcp
+PublishPort=[::1]:38080:38080/tcp
+PublishPort=127.0.0.1:4000:4000/tcp
+PublishPort=[::1]:4000:4000/tcp
+
+[Install]
+# Infrastructure, not a disposable environment: enabled once, it comes back
+# after a reboot without anyone logging in. `scripts/manage-stack.sh up` starts
+# it without enabling.
+WantedBy=default.target
+
+[Service]
+Restart=on-failure
+RestartSec=30s
+MemoryMax=512M
