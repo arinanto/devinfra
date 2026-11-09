@@ -78,6 +78,14 @@ DIRS=(
 # absent from DIRS on purpose: _copying_seeds creates them with the files it
 # puts there, and listing them twice would report them as already present.
 
+# The two kinds of value in installed/envars/agentgateway.env that this script
+# generates instead of leaving as a placeholder: the gateway's session key and
+# every downstream route token. Kept as a sed *substitution* because the drift
+# report blanks those values on both sides before comparing -- a generated value
+# can never equal the seed it came from, and comparing it would name the file
+# on every run of an untouched install.
+SECRET_LINE_SED='s/^(AGENTGW_SESSION_KEY|DOWNSTREAM_[A-Z0-9_]+)=.*/\1=/'
+
 # Run tallies, filled in by the helpers below and reported by _printing_summary.
 DIRS_CREATED=0
 SEEDS_COPIED=0
@@ -90,6 +98,20 @@ _is_sourced() {
   [ "${#FUNCNAME[@]}" -ge 2 ] \
     && [ "${FUNCNAME[0]}" = '_is_sourced' ] \
     && [ "${FUNCNAME[1]}" = 'source' ]
+}
+
+# 0. Preconditions
+#
+# The gateway's session key and downstream tokens are generated while seeding,
+# so openssl is not optional. Checked before anything is written, because a run
+# that failed partway would leave installed/envars/agentgateway.env holding
+# placeholders, and every later run would skip it as already present.
+_checking_openssl() {
+  if ! command -v openssl >/dev/null 2>&1; then
+    printf 'setup.sh: openssl is required to generate the gateway tokens\n' >&2
+    printf 'setup.sh: nothing was written\n' >&2
+    exit 1
+  fi
 }
 
 # 1. Directory tree
@@ -131,6 +153,55 @@ _substituting_root() {
   sed "s|@REPO_ROOT@|$escaped|g" -- "$1"
 }
 
+# A downstream route token: 32 alphanumeric characters from the kernel CSPRNG,
+# as installed/envars/agentgateway.env documents.
+#
+# base64 rather than hex, because hex would allow 16 symbols where 32
+# characters can hold 62: same length, more entropy. 48 random bytes are 64
+# base64 characters of which about 60 survive the filter, so cut always has more
+# than 32 to take; it also reads to EOF, where `head -c` would close the pipe
+# early and, under `set -o pipefail`, turn a SIGPIPE into a failed assignment.
+# LC_ALL=C keeps the tr ranges meaning A-Z and a-z rather than whatever the
+# locale says they are.
+_generating_downstream_token() {
+  openssl rand -base64 48 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-32
+}
+
+# Fill in the values that are generated rather than obtained from elsewhere:
+# the gateway's session key (the guide's `openssl rand -hex 32`) and every
+# DOWNSTREAM_* token. Provider keys keep their placeholder -- they come from a
+# platform, not from a CSPRNG -- and so does every other line, comments included,
+# which is why this rewrites only the two shapes it knows and copies the rest
+# through untouched.
+#
+# Called on the copy, never on the seed: an installed file is skipped once it
+# exists, so a rotated token or a filled-in provider key survives a re-run.
+_filling_generated_values() {
+  local dest="$1" line tmp="$1.tmp.$$"
+
+  while IFS= read -r line || [[ -n $line ]]; do
+    # The two shapes that are generated, matched from the start of the line so a
+    # comment mentioning a name (or describing `openssl rand -hex 24`) is left
+    # alone; everything else falls through unchanged.
+    case $line in
+      AGENTGW_SESSION_KEY=*)
+        printf 'AGENTGW_SESSION_KEY=%s\n' "$(openssl rand -hex 32)"
+        ;;
+      DOWNSTREAM_*=*)
+        printf '%s=%s\n' "${line%%=*}" "$(_generating_downstream_token)"
+        ;;
+      *)
+        printf '%s\n' "$line"
+        ;;
+    esac
+  done < "$dest" > "$tmp"
+
+  # Same shape as the @REPO_ROOT@ rewrite: mode carried over from the copy, then
+  # moved into place, so no half-written env file is ever loaded by a unit.
+  chmod --reference="$dest" -- "$tmp"
+  mv -- "$tmp" "$dest"
+}
+
 _copying_seeds() {
   local src rel dest
 
@@ -155,6 +226,12 @@ _copying_seeds() {
       mv -- "$dest.tmp.$$" "$dest"
     fi
 
+    # The gateway's tokens are the one part of the seed that is generated rather
+    # than filled in by hand, and this first copy is the only moment it happens.
+    if [[ $rel == envars/agentgateway.env ]]; then
+      _filling_generated_values "$dest"
+    fi
+
     # installed/envars/ holds the real API keys and generated tokens, and the
     # seeds ship world-readable (0644). Tighten the copy to owner-only; every
     # other seed keeps its mode.
@@ -176,7 +253,11 @@ _copying_seeds() {
 #
 # The comparison substitutes @REPO_ROOT@ first, otherwise every installed unit
 # would differ from its seed by the substitution alone and the report would name
-# all of them forever.
+# all of them forever. The generated gateway values are blanked on both sides for
+# the same reason: SECRET_LINE_SED turns `NAME=anything` into `NAME=` in the seed
+# and in the install alike, so only what an operator merges by hand -- comments,
+# variable names, provider keys -- is compared, and a variable added to the seed
+# still shows up.
 _reporting_drift() {
   local src rel
 
@@ -186,7 +267,9 @@ _reporting_drift() {
     # Absent means this run created it; that is not drift.
     [[ -e $INSTALLED_DIR/$rel ]] || continue
 
-    if ! cmp -s <(_substituting_root "$src") "$INSTALLED_DIR/$rel"; then
+    if ! cmp -s \
+      <(_substituting_root "$src" | sed -E -- "$SECRET_LINE_SED") \
+      <(sed -E -- "$SECRET_LINE_SED" "$INSTALLED_DIR/$rel"); then
       printf 'differs   %s\n' "installed/$rel"
       SEEDS_DRIFTED=$((SEEDS_DRIFTED + 1))
     fi
@@ -208,14 +291,17 @@ _printing_summary() {
   fi
 
   if (( SEEDS_COPIED > 0 )); then
-    printf '\nSeeds were copied verbatim; replace the placeholder values before\n'
-    printf 'starting the stack (installed/envars/*.env,\n'
+    printf '\nSeeds were copied as-is, except that the session key and the\n'
+    printf 'downstream tokens in installed/envars/agentgateway.env were generated\n'
+    printf 'on the way. Still placeholders: the provider keys there, the values in\n'
+    printf 'the other installed/envars/*.env files,\n'
     printf 'installed/data/agentgateway/config.yaml and\n'
-    printf 'installed/data/agentgateway/agwadmins.htpasswd).\n'
+    printf 'installed/data/agentgateway/agwadmins.htpasswd.\n'
   fi
 }
 
 _main() {
+  _checking_openssl
   _creating_directory_tree
   _copying_seeds
   _reporting_drift

@@ -64,6 +64,16 @@ manages the units afterwards:
    this into a copy-if-different. The drift report at the end of the run is what
    keeps the other half visible: a pull changes `skel/` and does **not** reach
    `installed/` on its own.
+
+   Generating a secret on that first copy is not an exception to it:
+   `installed/envars/agentgateway.env` gets `AGENTGW_SESSION_KEY`
+   (`openssl rand -hex 32`) and every `DOWNSTREAM_*` token (32 alphanumeric
+   characters) filled in while it is seeded, so no token is committed and none
+   has to be invented by hand. They are generated only when the file is absent --
+   a re-run never rotates them -- and `_reporting_drift` blanks those lines on
+   both sides before comparing, otherwise an untouched install would report the
+   file as drift on every run. That masking is why a new variable or an edited
+   comment in the seed is still reported.
 4. **No unit hardcodes a host path.** `skel/quadlets/` carries `@REPO_ROOT@` where
    the checkout's absolute path belongs, and `scripts/setup.sh` substitutes it
    while seeding, so the stack works wherever the tree is cloned. Do not
