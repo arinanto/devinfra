@@ -56,10 +56,9 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # The seed tree and its destination, both resolved from the checkout.
 SKEL_DIR="$REPO_ROOT/skel"
 INSTALLED_DIR="$REPO_ROOT/installed"
-CLIENTS_DIR="$REPO_ROOT/clients/pi"
 
 # Every directory the install needs beyond the ones the seed copy creates, i.e.
-# the empty runtime directories plus the two sources outside installed/.
+# the empty runtime directories plus the one build input outside installed/.
 DIRS=(
   # Quadlet bind-mount targets: empty by nature, nothing to seed them from
   "installed/data/playwrightmcp"  # playwrightmcp: /mnt/playwrightmcp -- screenshots, downloads
@@ -68,9 +67,6 @@ DIRS=(
 
   # Build input
   "builds/postgisvec"             # Quadlet SetWorkingDirectory
-
-  # Fill-in-then-copy client configs for an external dev environment
-  "clients/pi"
 )
 
 # installed/quadlets, installed/envars and installed/data/agentgateway are
@@ -82,8 +78,6 @@ DIRS_CREATED=0
 SEEDS_COPIED=0
 SEEDS_SKIPPED=0
 SEEDS_DRIFTED=0
-CLIENTS_COPIED=0
-CLIENTS_SKIPPED=0
 
 # check to see if this file is being run or sourced from another script
 _is_sourced() {
@@ -165,36 +159,12 @@ _reporting_drift() {
   done < <(find "$SKEL_DIR" -type f -print0 | sort -z)
 }
 
-# 4. clients/pi/*.example -> clients/pi/*
-#
-# Deliberately not seeded into installed/: these describe how a client on
-# another machine reaches this one, so they are examples to fill in and copy
-# away, not state this host runs on.
-_copying_client_examples() {
-  local src dest
-
-  while IFS= read -r -d '' src; do
-    dest="${src%.example}"
-
-    if [[ -e $dest ]]; then
-      CLIENTS_SKIPPED=$((CLIENTS_SKIPPED + 1))
-      continue
-    fi
-
-    cp -- "$src" "$dest"
-    printf 'created   file  %s\n' "${dest#"$REPO_ROOT"/}"
-    CLIENTS_COPIED=$((CLIENTS_COPIED + 1))
-  done < <(find "$CLIENTS_DIR" -type f -name '*.example' -print0 | sort -z)
-}
-
 _printing_summary() {
   printf '\n'
   printf 'directories  %d created, %d present\n' \
     "$DIRS_CREATED"     "$(( ${#DIRS[@]} - DIRS_CREATED ))"
   printf 'seeds        %d copied, %d already present\n' \
     "$SEEDS_COPIED"     "$SEEDS_SKIPPED"
-  printf 'clients      %d copied, %d already present\n' \
-    "$CLIENTS_COPIED"   "$CLIENTS_SKIPPED"
 
   if (( SEEDS_DRIFTED > 0 )); then
     printf 'drift        %d seed(s) differ from installed/\n' "$SEEDS_DRIFTED"
@@ -214,7 +184,6 @@ _printing_summary() {
 _main() {
   _creating_directory_tree
   _copying_seeds
-  _copying_client_examples
   _reporting_drift
   _printing_summary
 }

@@ -85,16 +85,9 @@ $RECYCLE.BIN/
 # skel/ by scripts/setup.sh and edited there afterwards -- widening a published
 # port, pointing a volume at another disk -- which is the whole reason it must
 # never be tracked. Nothing inside it is meant to be committed, so the directory
-# goes in one rule, without the file negations the template directories below
-# still need.
+# goes in one rule: no `!` negations, and no `*.example` exception -- there are
+# no templates to keep.
 installed/
-
-# clients/ -- per-machine client configs (filled-in copies of the templates).
-# These stay outside installed/: they describe how a client on ANOTHER machine
-# reaches this stack, so they are examples to copy away, not local state.
-clients/**
-!clients/**/
-!clients/**/*.example
 
 # builds/forgejomcp/binaries/ -- upstream release object code, GPL-3.0-or-later
 # (see THIRD-PARTY.md). Committing it would make this repository its distributor

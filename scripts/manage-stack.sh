@@ -135,8 +135,6 @@ on devnetng, container to container only (not published):
   Postgres  systemd-postgres:5432      Valkey  systemd-valkey:6379
   Gateway   systemd-agentgateway:4000  Playwright  systemd-playwrightmcp:8931
   Forgejo   systemd-forgejomcp:8080
-
-Client configs for another machine: clients/pi/ (see README).
 EOF
 }
 
