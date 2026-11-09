@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "github-personal": {
+    "github": {
       "url": "http://127.0.0.1:4000/mcp/github",
       "headers": {
         "Authorization": "Bearer <DOWNSTREAM_GITHUB_MCP_TOKEN from envars/agentgateway.env>"
