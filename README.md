@@ -88,7 +88,7 @@ scripts/            Host-side scripts; all of them resolve paths from the repo r
   setup.sh          Seed installed/ from skel/
 skel/               Tracked seeds, copied into installed/ and never edited in place
   quadlets/         Podman Quadlet unit files (@REPO_ROOT@ substituted at seed time)
-  envars/           Environment file seeds, holding placeholder values
+  envars/           Seeds holding placeholders; setup.sh generates the gateway tokens
   data/             Gateway config seed
 ```
 
@@ -109,7 +109,9 @@ them. See [`THIRD-PARTY.md`](THIRD-PARTY.md).
 
 - Rootless Podman 4.x or newer (Quadlet support)
 - systemd user session
-- `openssl` (secret generation)
+- `openssl` — required by `scripts/setup.sh`: it generates the gateway's session
+  key and one token per MCP route while seeding, and stops before writing
+  anything when `openssl` is missing
 - `curl` and `sha256sum` (the forgejo-mcp bundle fetch)
 - Network access to pull the base images on first run
 
@@ -257,8 +259,9 @@ stops early when a step fails.
 verifies each against a pinned sha256. Re-running it is free — a bundle already
 present is skipped — so it can sit in a deploy script unconditionally.
 
-`scripts/setup.sh` needs no container runtime — it only creates directories and
-copies seeds, and it never overwrites an existing file. That is deliberate:
+`scripts/setup.sh` needs no container runtime — it creates directories, copies
+seeds and generates the gateway's tokens, and it never overwrites an existing
+file. That is deliberate:
 `installed/` is where this machine's decisions live, and the consequence is that a
 `git pull` changes `skel/` and does not reach `installed/`. The run ends with a
 `differs` line for every seed that disagrees with the install; `diff -rq skel/
@@ -487,7 +490,9 @@ systemd-agentgateway` before suspecting the browser container.
   client outside the network needs a bearer token to get there.
 - Env files created by `scripts/setup.sh` under `installed/envars/` are chmod
   `600`, since they are where the API keys and proxy tokens end up. The tracked
-  seeds next to them are placeholders and hold no credential.
+  seeds next to them are placeholders and hold no credential, and the gateway's
+  session key and route tokens are generated into the installed copy — never
+  copied from git, so no shared token was ever committed.
 - Both stacks on one host is not a supported layout: the unit names, the network
   name and the loopback ports would collide. Run one.
 

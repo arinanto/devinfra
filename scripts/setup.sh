@@ -181,8 +181,8 @@ _filling_generated_values() {
 
   while IFS= read -r line || [[ -n $line ]]; do
     # The two shapes that are generated, matched from the start of the line so a
-    # comment mentioning a name (or describing `openssl rand -hex 24`) is left
-    # alone; everything else falls through unchanged.
+    # comment that happens to mention a name is left alone; everything else falls
+    # through unchanged.
     case $line in
       AGENTGW_SESSION_KEY=*)
         printf 'AGENTGW_SESSION_KEY=%s\n' "$(openssl rand -hex 32)"

@@ -16,7 +16,10 @@ Two trees matter, and the distinction is the whole design:
 - **`skel/`** is tracked, and is a mirror of what a running install needs:
   `skel/quadlets/`, `skel/envars/`, `skel/data/`. The files carry the names they
   will have once installed, not `*.example` names, because a deployment fills
-  them in under `installed/` and never in place.
+  them in under `installed/` and never in place. The gateway's session key and
+  route tokens are the one exception: the seed keeps a placeholder and
+  `scripts/setup.sh` generates the real value in the copy, so no token is
+  committed and none has to be invented by hand.
 - **`installed/`** is gitignored and belongs to this machine: the units systemd
   loads, the env files holding real keys, the container state. Seeded from
   `skel/` by `scripts/setup.sh`, edited there afterwards.
@@ -34,8 +37,10 @@ manages the units afterwards:
   forgejo-mcp release bundles, verifies each against a pinned sha256, and skips
   anything already present.
 - `scripts/setup.sh` — seeds `installed/` from `skel/`, substitutes
-  `@REPO_ROOT@`, creates the empty runtime directories, and reports seeds that
-  disagree with the install.
+  `@REPO_ROOT@`, generates the gateway's session key and one `DOWNSTREAM_*`
+  token per route, creates the empty runtime directories, and reports seeds that
+  disagree with the install. Needs `openssl`; checks for it before writing
+  anything.
 - `scripts/link-quadlets.sh` — symlinks `installed/quadlets/` into the rootless
   Quadlet search path.
 - `scripts/manage-stack.sh` — starts/stops the units and prints where they are.
@@ -47,7 +52,9 @@ manages the units afterwards:
    container state. `skel/` is tracked, so a seed may ship a credential's *name*
    and never a value — `skel/envars/*.env` is a tracked file, and a real key
    pasted into it is a committed secret even though the copy in `installed/envars/`
-   is the one in use.
+   is the one in use. Generating a value into the copy at seed time is the safe
+   form of the same rule: the token exists only under `installed/`, which git
+   never sees.
    `builds/forgejomcp/binaries/` is ignored for a licence reason, not a secrecy
    one: it is upstream GPL object code, and committing it makes this repository
    its distributor (see `THIRD-PARTY.md`).
@@ -176,7 +183,9 @@ RestartSec=30s
 **Add an env var** — add it to the seed in `skel/envars/<file>.env`, to the table
 in `README.md`, and to the unit in `skel/quadlets/` that consumes it if it is new.
 An existing `installed/envars/<file>.env` is never overwritten, so say in the
-commit that an installed host has to add the value by hand.
+commit that an installed host has to add the value by hand. A name matching
+`AGENTGW_SESSION_KEY` or `DOWNSTREAM_*=*` is generated instead — see invariant 3 —
+so the seed carries the shape and no value.
 
 **Add a container unit** — drop a `.container` into `skel/quadlets/`;
 `scripts/setup.sh` seeds it into `installed/quadlets/` and
@@ -189,7 +198,10 @@ from.
 **Add a gateway route** — `skel/data/agentgateway/config.yaml`, a
 `DOWNSTREAM_*TOKEN` in `skel/envars/agentgateway.env`, a row in the README table,
 and a header for it in the client's own config, which lives outside this
-repository. Mirror an existing route rather than inventing a shape: `pathPrefix`
+repository. The seed needs the token's *name*, not a value: a fresh seed
+generates one (`DOWNSTREAM_*=*` is in `SECRET_LINE_SED`), while an existing
+install is never overwritten and so has to gain the line by hand. Mirror an
+existing route rather than inventing a shape: `pathPrefix`
 + `urlRewrite.full: /mcp/` for streamable HTTP (see `playwright-mcp-proxy`), which
 unlike the GitHub route has no `method:` because streamable HTTP also uses GET and
 DELETE. `forgejo-mcp-proxy`
@@ -241,7 +253,7 @@ present, and it should make no request at all.
 `scripts/setup.sh` writes only inside the checkout and is idempotent. Run it
 twice against a throwaway copy of the repository: the second run must copy
 nothing and report no drift. Any `differs` line on an untouched install is a
-substitution bug, not a local edit.
+substitution bug or a hole in `SECRET_LINE_SED`, not a local edit.
 
 A fresh seed must leave no placeholder behind — this is the check that catches a
 seed whose path the substitution missed:
@@ -249,6 +261,16 @@ seed whose path the substitution missed:
 ```bash
 grep -rn '@REPO_ROOT@' installed/quadlets/ || echo 'all substituted'
 ```
+
+And the gateway's generated values must be real values, not the seed's text:
+
+```bash
+grep -n '^AGENTGW_SESSION_KEY=' installed/envars/agentgateway.env   # 64 hex chars
+grep -n '^DOWNSTREAM_'       installed/envars/agentgateway.env   # 32 alnum each
+```
+
+A second run must leave those tokens untouched; only the absent-file path
+generates them.
 
 `scripts/link-quadlets.sh` needs `installed/quadlets/` to exist, so seed first,
 and note that it writes into `$XDG_CONFIG_HOME` (default `$HOME/.config`).
