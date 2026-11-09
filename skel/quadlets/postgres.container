@@ -3,8 +3,8 @@ Description=Local PostgreSQL development database
 
 [Container]
 Image=postgisvec.build
-EnvironmentFile=%h/Containers/devinfra/envars/postgres.env
-Volume=%h/Containers/devinfra/data/postgres:/var/lib/postgresql:U,Z
+EnvironmentFile=@REPO_ROOT@/installed/envars/postgres.env
+Volume=@REPO_ROOT@/installed/data/postgres:/var/lib/postgresql:U,Z
 Network=devnetng.network
 PublishPort=127.0.0.1:5432:5432/tcp
 PublishPort=[::1]:5432:5432/tcp

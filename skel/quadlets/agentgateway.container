@@ -1,5 +1,9 @@
 # Podman Quadlet for the agent gateway.
 #
+# @REPO_ROOT@ is substituted by scripts/setup.sh when this file is seeded into
+# installed/quadlets: it is this checkout's absolute path, baked in at that
+# moment, not a systemd specifier. See skel/quadlets/README.
+#
 # The gateway is the one thing every development environment has to reach, so in
 # this stack it is also the one unit whose agent listener is published: the
 # `agent` gateway (port 4000) carries the OpenAI-compatible LLM API, the
@@ -17,12 +21,12 @@
 # "Reaching the stack from another machine". What must never change is the mode:
 # `optional` (the gateway's default when omitted) or `permissive` admits keyless
 # requests, and then anything that can reach this port can spend the provider
-# keys in envars/agentgateway.env.
+# keys in installed/envars/agentgateway.env.
 #
 # The `user` gateway (38080) is the admin UI, behind HTTP basic auth from
-# data/agentgateway/agwadmins.htpasswd. It stays on loopback in every shape: it is
-# what mints those virtual keys and edits the routes, so publishing it would hand
-# out the keys the LLM listener is gated with.
+# installed/data/agentgateway/agwadmins.htpasswd. It stays on loopback in every
+# shape: it is what mints those virtual keys and edits the routes, so publishing
+# it would hand out the keys the LLM listener is gated with.
 
 [Unit]
 Description=Agent gateway: LLM proxy, MCP proxies, admin UI
@@ -30,8 +34,8 @@ Description=Agent gateway: LLM proxy, MCP proxies, admin UI
 [Container]
 Image=cr.agentgateway.dev/agentgateway:v1.7.0
 RunInit=true
-EnvironmentFile=%h/Containers/devinfra/envars/agentgateway.env
-Volume=%h/Containers/devinfra/data/agentgateway:/config:U,Z
+EnvironmentFile=@REPO_ROOT@/installed/envars/agentgateway.env
+Volume=@REPO_ROOT@/installed/data/agentgateway:/config:U,Z
 Network=devnetng.network
 PublishPort=127.0.0.1:38080:38080/tcp
 PublishPort=[::1]:38080:38080/tcp

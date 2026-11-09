@@ -14,11 +14,12 @@
 # is no PublishPort= here, and adding one would put an unauthenticated browser
 # on the host's loopback (see README, "Reaching the stack from another machine").
 #
-# Screenshots and downloads land in data/playwrightmcp/ on the host, which is
-# where the dev environment reads them from: there is no fakevm /mnt/playwrightmcp
-# mount to hand them over in this stack. `:U` maps the files to the container
-# user, so files arrive owned by a mapped subuid; they are world-readable, which
-# is what makes them readable by the host user without any extra mount.
+# Screenshots and downloads land in installed/data/playwrightmcp/ on the host,
+# which is where the dev environment reads them from: there is no fakevm
+# /mnt/playwrightmcp mount to hand them over in this stack. `:U` maps the files
+# to the container user, so files arrive owned by a mapped subuid; they are
+# world-readable, which is what makes them readable by the host user without any
+# extra mount.
 
 [Unit]
 Description=Playwright MCP browser server (headless Chromium)
@@ -32,7 +33,7 @@ StartLimitBurst=3
 Image=mcr.microsoft.com/playwright/mcp:v0.0.83
 Network=devnetng.network
 RunInit=true
-Volume=%h/Containers/devinfra/data/playwrightmcp:/mnt/playwrightmcp:U,z
+Volume=@REPO_ROOT@/installed/data/playwrightmcp:/mnt/playwrightmcp:U,z
 Entrypoint=node
 Exec=/app/cli.js \
     --headless --browser chromium \

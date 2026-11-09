@@ -3,7 +3,7 @@ Description=Local Valkey development cache
 
 [Container]
 Image=docker.io/valkey/valkey:9-trixie
-Volume=%h/Containers/devinfra/data/valkey:/data:U,Z
+Volume=@REPO_ROOT@/installed/data/valkey:/data:U,Z
 Network=devnetng.network
 PublishPort=127.0.0.1:6379:6379/tcp
 PublishPort=[::1]:6379:6379/tcp

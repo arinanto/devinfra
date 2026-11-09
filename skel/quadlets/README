@@ -1,0 +1,22 @@
+These are the unit seeds, not the units this machine runs.
+
+scripts/setup.sh copies this directory to installed/quadlets/, and
+scripts/link-quadlets.sh links the result into the rootless Quadlet search path.
+Edit installed/quadlets/ for a deployment; edit these only to change the default
+every install starts from.
+
+@REPO_ROOT@
+    A placeholder for this checkout's absolute path, substituted by
+    scripts/setup.sh while seeding, so no unit has to assume where the checkout
+    lives. It is not a systemd specifier: a `%h/...` path would break as soon as
+    the tree is cloned somewhere else, and an unsubstituted @REPO_ROOT@ in an
+    installed unit points at a directory that does not exist -- a loud failure,
+    not a silent one.
+
+    Everything a unit refers to at run time is therefore under the checkout:
+    installed/envars/ for EnvironmentFile=, installed/data/ for Volume=, and
+    builds/ for the SetWorkingDirectory= of a .build unit.
+
+Nothing else in this directory is read by Quadlet: the link step selects by
+extension (.container, .build, .network), so this file stays out of the search
+path after the copy.

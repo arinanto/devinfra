@@ -8,7 +8,7 @@
 #
 # Nothing is published, same as playwrightmcp. Clients reach this server through
 # the gateway's /mcp/forgejo route on port 4000
-# (data/agentgateway/config.yaml.example, route forgejo-mcp-proxy), so every
+# (skel/data/agentgateway/config.yaml, route forgejo-mcp-proxy), so every
 # MCP server in this stack is one port and one firewall rule.
 #
 # Through the gateway, the bearer token a client sends is still ITS OWN Forgejo
@@ -29,7 +29,7 @@
 #
 # No [Unit] dependency ordering against the rest of the stack: this unit dials
 # its Forgejo instance at startup and exits non-zero when it cannot reach it, so
-# under the shipped envars/forgejomcp.env template it restarts every RestartSec
+# under the shipped skel/envars/forgejomcp.env seed it restarts every RestartSec
 # until FORGEJO_URL and FORGEJO_ACCESS_TOKEN are filled in. That is the intended
 # failure mode and it is isolated: nothing else in the stack wants this unit.
 #
@@ -41,7 +41,7 @@ Description=Forgejo MCP server over streamable HTTP
 
 [Container]
 Image=forgejomcp.build
-EnvironmentFile=%h/Containers/devinfra/envars/forgejomcp.env
+EnvironmentFile=@REPO_ROOT@/installed/envars/forgejomcp.env
 Network=devnetng.network
 
 [Install]

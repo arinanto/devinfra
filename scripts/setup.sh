@@ -17,6 +17,12 @@
 # installed/ is gitignored, and git cannot recreate an ignored tree, so the empty
 # runtime directories are made here from the DIRS list below.
 #
+# Unit files carry @REPO_ROOT@ where the checkout's absolute path belongs, and
+# the copy substitutes it: a deployment edit then need not know where the tree
+# lives, and no unit has to assume %h/Containers/devinfra. The substitution is
+# what makes an installed unit point at a directory that exists, so it happens
+# here, before link-quadlets.sh ever sees the file.
+#
 # Two rules keep it safe to re-run on a live install:
 #   * it never overwrites a file that already exists -- an installed/quadlets/
 #     unit tuned for this host, an installed/envars/*.env holding real keys and a
@@ -37,9 +43,8 @@
 # sourced on their own without side effects.
 #
 # Paths resolve relative to this script's parent -- the repository root -- not
-# to $HOME, so the checkout may live anywhere. Note that skel/quadlets/*.container
-# hard-code %h/Containers/devinfra/... -- if the tree is not checked out there,
-# those units need adjusting on their own; this script does not do that.
+# to $HOME, so the checkout may live anywhere: @REPO_ROOT@ is filled in with
+# wherever it actually is.
 
 # Exit immediately on errors
 set -e
@@ -110,6 +115,22 @@ _creating_directory_tree() {
 # machine's decisions live: a unit widened for the host, an env file with real
 # keys, a filled-in gateway config. Seeding over them would discard exactly what
 # the split exists to protect, so the copy is per file and never forced.
+
+# Replace @REPO_ROOT@ in a seed, writing the result to stdout.
+#
+# The replacement is used as a sed *replacement*, so the two characters sed
+# treats specially there have to be escaped: & means "the whole match" and \
+# starts an escape. A checkout path containing either is unlikely and would
+# otherwise corrupt the line rather than being reported.
+_substituting_root() {
+  local escaped="$REPO_ROOT"
+
+  escaped="${escaped//\\/\\\\}"
+  escaped="${escaped//&/\\&}"
+
+  sed "s|@REPO_ROOT@|$escaped|g" -- "$1"
+}
+
 _copying_seeds() {
   local src rel dest
 
@@ -124,6 +145,15 @@ _copying_seeds() {
 
     mkdir -p -- "$(dirname -- "$dest")"
     cp -p -- "$src" "$dest"
+
+    # Written to a temporary file and moved into place rather than edited in
+    # place, so a partially written unit cannot be left behind; chmod --reference
+    # keeps the mode the copy had.
+    if grep -qF -- '@REPO_ROOT@' "$dest"; then
+      _substituting_root "$dest" > "$dest.tmp.$$"
+      chmod --reference="$dest" -- "$dest.tmp.$$"
+      mv -- "$dest.tmp.$$" "$dest"
+    fi
 
     # installed/envars/ holds the real API keys and generated tokens, and the
     # seeds ship world-readable (0644). Tighten the copy to owner-only; every
@@ -143,6 +173,10 @@ _copying_seeds() {
 # install that differs may be the deliberate one. Naming them is the whole
 # service -- deciding which copy wins is the operator's, and a plain diff shows
 # what would change.
+#
+# The comparison substitutes @REPO_ROOT@ first, otherwise every installed unit
+# would differ from its seed by the substitution alone and the report would name
+# all of them forever.
 _reporting_drift() {
   local src rel
 
@@ -152,7 +186,7 @@ _reporting_drift() {
     # Absent means this run created it; that is not drift.
     [[ -e $INSTALLED_DIR/$rel ]] || continue
 
-    if ! cmp -s -- "$src" "$INSTALLED_DIR/$rel"; then
+    if ! cmp -s <(_substituting_root "$src") "$INSTALLED_DIR/$rel"; then
       printf 'differs   %s\n' "installed/$rel"
       SEEDS_DRIFTED=$((SEEDS_DRIFTED + 1))
     fi

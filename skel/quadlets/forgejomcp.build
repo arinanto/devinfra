@@ -18,5 +18,5 @@ Description=Debian + forgejo-mcp (upstream release binary) image
 
 [Build]
 ImageTag=localhost/quadlet/forgejomcp:latest
-SetWorkingDirectory=%h/Containers/devinfra/builds/forgejomcp
+SetWorkingDirectory=@REPO_ROOT@/builds/forgejomcp
 File=Containerfile
