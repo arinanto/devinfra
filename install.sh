@@ -9,12 +9,12 @@
 #
 #   scripts/pre-setup.sh      fetch the forgejo-mcp release bundles. A build
 #                             input, and the only step that needs the network.
-#   scripts/setup.sh          rebuild the gitignored tree: directories and
-#                             *.example -> real files. What the image builds and
-#                             the units read.
-#   scripts/link-quadlets.sh  symlink quadlets/ into the rootless Quadlet
-#                             search path. What makes the units visible to
-#                             systemd at all.
+#   scripts/setup.sh          seed installed/ from skel/: the units, the
+#                             environment files and the container state this
+#                             machine runs on.
+#   scripts/link-quadlets.sh  symlink installed/quadlets/ into the rootless
+#                             Quadlet search path. What makes the units visible
+#                             to systemd at all.
 #
 # All three are idempotent and none of them overwrites: re-running this costs a
 # stat per directory and a check for missing bundles, and nothing more.
@@ -53,8 +53,8 @@ _usage() {
   cat <<'EOF'
 usage: install.sh [--all-arch]
 
-Prepare the checkout: fetch the forgejo-mcp release bundles, rebuild the
-gitignored tree, then link the units into the rootless Quadlet search path.
+Prepare the checkout: fetch the forgejo-mcp release bundles, seed installed/
+from skel/, then link the units into the rootless Quadlet search path.
 
   --all-arch   fetch every pinned architecture instead of only this host's
   -h, --help   this text
@@ -102,7 +102,8 @@ _main() {
   # link-quadlets.sh prints the daemon-reload reminder itself; do not repeat it.
   _running_step "$REPO_ROOT/scripts/link-quadlets.sh"
 
-  printf '\nnext: fill in envars/*.env and data/agentgateway/config.yaml, then\n'
+  printf '\nnext: fill in installed/envars/*.env and\n'
+  printf '      installed/data/agentgateway/config.yaml, then\n'
   printf '      ./scripts/manage-stack.sh up\n'
 }
 

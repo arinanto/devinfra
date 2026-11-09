@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #
-# scripts/link-quadlets.sh -- link quadlets/ into the rootless Quadlet search path.
+# scripts/link-quadlets.sh -- link installed/quadlets/ into the rootless Quadlet
+# search path.
 #
-# Quadlet only reads units from fixed directories, so the files in this repo
-# have to appear under ~/.config/containers/systemd. Symlinking rather than
-# copying means edits here take effect on the next `systemctl --user
-# daemon-reload` with no second copy to keep in sync.
+# Quadlet only reads units from fixed directories, so the units this machine runs
+# have to appear under ~/.config/containers/systemd. The source is installed/
+# rather than skel/: systemd must load the copy a deployment has tuned, not the
+# seed. Symlinking rather than copying means an edit to that copy takes effect on
+# the next `systemctl --user daemon-reload` with no third copy to keep in sync.
 #
 # The quadlets hardcode their host paths as %h/Containers/devinfra/... because
 # systemd expands %h to the invoking user's home. Those paths are baked into the
@@ -31,15 +33,16 @@ set -o pipefail
 # expand to, are relative to the checkout, never to scripts/.
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-QUADLET_DIR="$REPO_ROOT/quadlets"
+QUADLET_DIR="$REPO_ROOT/installed/quadlets"
 
 # Rootless Quadlet search path: $XDG_CONFIG_HOME/containers/systemd, which
 # defaults to ~/.config/containers/systemd. Respect XDG_CONFIG_HOME when set.
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 TARGET_DIR="$CONFIG_HOME/containers/systemd"
 
-# Extensions Quadlet actually reads. Anything else in quadlets/ stays out of the
-# search path, where an unknown suffix could otherwise confuse a reader.
+# Extensions Quadlet actually reads. Anything else in installed/quadlets/ stays
+# out of the search path, where an unknown suffix could otherwise confuse a
+# reader.
 QUADLET_EXTENSIONS=(container build network)
 
 # check to see if this file is being run or sourced from another script
@@ -55,8 +58,9 @@ _is_sourced() {
 # Rather than assuming the layout, each hardcoded path is matched against this
 # checkout: the longest trailing part of it that exists under $REPO_ROOT is the
 # sub-tree the path points into, and everything before that sub-tree is the
-# expected root. For %h/Containers/devinfra/data/valkey with a checkout at
-# ~/workspaces/devinfra this yields %h/Containers/devinfra, whatever the depth.
+# expected root. For %h/Containers/devinfra/installed/data/valkey with a
+# checkout at ~/workspaces/devinfra this yields %h/Containers/devinfra, whatever
+# the depth.
 _extracting_expected_root() {
   local -a matches
   local match rel suffix prefix
@@ -180,6 +184,14 @@ _reporting_stale_links() {
 
 _main() {
   local expected
+
+  # Seeding is what makes installed/quadlets exist, and every unit path in it
+  # points there too. Failing with the fix beats "no quadlet files found".
+  if [[ ! -d $QUADLET_DIR ]]; then
+    printf 'error: %s does not exist\n' "${QUADLET_DIR#"$REPO_ROOT"/}" >&2
+    printf '       run ./scripts/setup.sh first: it seeds installed/ from skel/\n' >&2
+    exit 1
+  fi
 
   expected="$(_extracting_expected_root)"
 

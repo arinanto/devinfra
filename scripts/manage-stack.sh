@@ -18,7 +18,7 @@
 # explicit act.
 #
 # Nothing here is destructive and nothing needs root: stopping a unit leaves its
-# data/ directory alone.
+# installed/data/ directory alone.
 
 set -e
 set -u
@@ -29,9 +29,10 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Service names, in start order. Quadlet generates <name>.service from
-# quadlets/<name>.container; the .build units are pulled in by `Image=` on the
-# containers that need them, and devnetng.network by `Network=`, so neither is
-# listed here.
+# installed/quadlets/<name>.container -- the copy seeded from skel/, which is the
+# one link-quadlets.sh links and the one a deployment may have tuned; the .build
+# units are pulled in by `Image=` on the containers that need them, and
+# devnetng.network by `Network=`, so neither is listed here.
 UNITS=(
   postgres
   valkey

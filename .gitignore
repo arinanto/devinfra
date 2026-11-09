@@ -80,24 +80,18 @@ $RECYCLE.BIN/
 # ---------------------------------------------------------------------------
 # devinfra: machine-local state, generated secrets and per-host config
 # ---------------------------------------------------------------------------
-# Everything under data/, envars/ and clients/ is provisioned per machine and is
-# never tracked. One exception keeps a fresh clone usable: the `*.example`
-# templates, which are the tracked, fill-in-yourself versions.
-#
-# The `!<dir>/**/` negations are load-bearing: git will not descend into an
-# excluded parent directory, so without them the file negations never match.
+# installed/ is everything this machine owns: the unit files systemd loads, the
+# environment files holding real keys, the container state. It is seeded from
+# skel/ by scripts/setup.sh and edited there afterwards -- widening a published
+# port, pointing a volume at another disk -- which is the whole reason it must
+# never be tracked. Nothing inside it is meant to be committed, so the directory
+# goes in one rule, without the file negations the template directories below
+# still need.
+installed/
 
-# data/ -- runtime state, database files, gateway config and its SQLite DBs
-data/**
-!data/**/
-!data/**/*.example
-
-# envars/ -- generated environment files; commit the *.example templates only
-envars/**
-!envars/**/
-!envars/**/*.example
-
-# clients/ -- per-machine client configs (filled-in copies of the templates)
+# clients/ -- per-machine client configs (filled-in copies of the templates).
+# These stay outside installed/: they describe how a client on ANOTHER machine
+# reaches this stack, so they are examples to copy away, not local state.
 clients/**
 !clients/**/
 !clients/**/*.example
