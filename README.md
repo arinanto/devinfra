@@ -25,7 +25,6 @@ development environment, or on a host that several of them share.
 - [Configuration](#configuration)
 - [Install](#install)
 - [Start, stop, boot](#start-stop-boot)
-- [Clients](#clients)
 - [Reaching the stack from another machine](#reaching-the-stack-from-another-machine)
 - [Networking and ports](#networking-and-ports)
 - [Troubleshooting](#troubleshooting)
@@ -40,19 +39,19 @@ development environment, or on a host that several of them share.
 | **Shared** | On one host, kept running | Several machines, over a tunnel or a private network |
 
 Both shapes run the identical units; the difference is how a client reaches
-them and whether the units are enabled at boot. Nothing in `quadlets/` changes
-between them — the published ports are loopback-only either way, and a remote
-client arrives through an SSH tunnel or a private link rather than through a
-port opened to the world. [Reaching the stack from another
+them and whether the units are enabled at boot. Nothing in `skel/quadlets/`
+changes between them — the published ports are loopback-only either way, and a
+remote client arrives through an SSH tunnel or a private link rather than through
+a port opened to the world. [Reaching the stack from another
 machine](#reaching-the-stack-from-another-machine) covers the exceptions and why
 they are not the default.
 
 What this repository does **not** provide is the development environment itself:
-no editor setup, no `fnm`/`uv`/`pnpm`, no agent config beyond the client
-examples in `clients/`. That is the point of the split — the machines on the
-client side live in their own repositories (`devstack`'s `fakevm`, or a real VM's
-usual provisioning), and they only need a handful of endpoints and tokens from
-here.
+no editor setup, no `fnm`/`uv`/`pnpm`, no agent config, and no client configs —
+those belong to the client and live with it. That is the point of the split: the
+machines on the client side live in their own repositories (`devstack`'s
+`fakevm`, or a real VM's usual provisioning), and they need only a handful of
+endpoints and tokens from here.
 
 ## Components
 
@@ -73,28 +72,33 @@ THIRD-PARTY.md      Licences of third-party code built into these images
 builds/
   forgejomcp/       Containerfile for the Forgejo MCP server (release bundles are not committed)
   postgisvec/       Containerfile for PostgreSQL + PostGIS + pgvector
-clients/pi/         Client config templates for an external dev environment
-data/               Persistent state (gitignored)
-  agentgateway/     Gateway config.yaml, model catalog, SQLite databases
-  playwrightmcp/    Browser output directory (screenshots, downloads)
-  postgres/         Database data directory
-  valkey/           Cache data directory
-envars/             Environment files consumed by the Quadlets (gitignored)
+installed/          This machine's install: seeded from skel/, gitignored, edited here
+  quadlets/         The units systemd loads (what link-quadlets.sh links)
+  envars/           Environment files the units load; 0600, real values
+  data/             Persistent state
+    agentgateway/   Gateway config.yaml, model catalog, SQLite databases
+    playwrightmcp/  Browser output directory (screenshots, downloads)
+    postgres/       Database data directory
+    valkey/         Cache data directory
 install.sh          Entry point: run the three scripts/ steps in order
-quadlets/           Podman Quadlet unit files
 scripts/            Host-side scripts; all of them resolve paths from the repo root
-  link-quadlets.sh  Symlink quadlets/ into the rootless Quadlet search path
+  link-quadlets.sh  Symlink installed/quadlets/ into the rootless Quadlet search path
   manage-stack.sh   Start, stop and inspect the units
   pre-setup.sh      Fetch the forgejo-mcp release bundles (gitignored build input)
-  setup.sh          Rebuild dirs, copy *.example templates
+  setup.sh          Seed installed/ from skel/
+skel/               Tracked seeds, copied into installed/ and never edited in place
+  quadlets/         Podman Quadlet unit files (@REPO_ROOT@ substituted at seed time)
+  envars/           Environment file seeds, holding placeholder values
+  data/             Gateway config seed
 ```
 
 ### What is committed
 
-Nothing under `data/`, `envars/` or `clients/` is tracked except `*.example`
-templates, so no private key, token or credential is ever in history.
-`scripts/setup.sh` is what rebuilds the ignored tree, which is why a fresh clone
-needs it before anything can start.
+Only `skel/` is tracked, and `installed/` is ignored as a whole, so no credential
+is ever in history: the real values live in `installed/envars/*.env`, which is
+what `scripts/setup.sh` creates from the seeds. `skel/envars/*.env` is itself a
+tracked file — it ships placeholders, and a real key pasted into it is a
+committed secret even though the copy under `installed/` is the one in use.
 
 `builds/forgejomcp/binaries/` is ignored for a different reason, and is the one
 build input git cannot carry: it holds upstream release binaries, and committing
@@ -118,18 +122,19 @@ WantedBy=default.target` or not.
 
 ## Configuration
 
-Secrets and tunables live in `envars/`, which the Quadlets load through
-`EnvironmentFile=`. Only the `*.example` templates are committed: `scripts/setup.sh`
-copies each one to its real name (minus the suffix) and the real files are
-gitignored. Fill in the values before starting the stack.
+Secrets and tunables live in `installed/envars/`, which the Quadlets load through
+`EnvironmentFile=`. The tracked seeds in `skel/envars/` hold placeholder values;
+`scripts/setup.sh` copies them to `installed/envars/` at `0600` and that copy is
+where the real values go. It is never overwritten, so a value added to a seed does
+not reach an existing install — re-run after a pull and read the drift report.
 
-`envars/postgres.env`
+`installed/envars/postgres.env`
 
 | Variable | Description |
 |---|---|
 | `POSTGRES_PASSWORD` | Database password for the `postgres` superuser |
 
-`envars/agentgateway.env`
+`installed/envars/agentgateway.env`
 
 | Variable | Description |
 |---|---|
@@ -139,8 +144,8 @@ gitignored. Fill in the values before starting the stack.
 | `OPENROUTER_API_KEY` | OpenRouter API key — serves Kimi K3.1 Pro |
 | `GITHUB_MCP_PAT` | GitHub PAT used by the MCP proxy (read-only scope recommended) |
 | `DOWNSTREAM_DEEPSEEK_SEARCH_TOKEN` | Bearer token clients present to the DeepSeek proxy — random |
-| `DOWNSTREAM_GITHUB_MCP_TOKEN` | Bearer token clients present to the GitHub MCP proxy — random (must match `clients/pi/mcp.json`) |
-| `DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN` | Bearer token clients present to the Playwright MCP proxy — random (must match `clients/pi/mcp.json`) |
+| `DOWNSTREAM_GITHUB_MCP_TOKEN` | Bearer token clients present to the GitHub MCP proxy — random (must match what your client sends) |
+| `DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN` | Bearer token clients present to the Playwright MCP proxy — random (must match what your client sends) |
 
 The three `DOWNSTREAM_*` tokens are shared, not per-client: one value per route,
 rotated in this file and in every client at once. The proxies have no
@@ -149,7 +154,7 @@ the exception: each environment can hold its own virtual key, minted in the
 dashboard, so its spend is attributable and revocable on its own. See [Virtual
 keys](#virtual-keys-llm-access).
 
-`envars/forgejomcp.env`
+`installed/envars/forgejomcp.env`
 
 | Variable | Description |
 |---|---|
@@ -159,53 +164,54 @@ keys](#virtual-keys-llm-access).
 | `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK` | `0` in this stack. `1` would serve a request with no `Authorization` header using `FORGEJO_ACCESS_TOKEN` — which is what devstack does, safely, because its only client is a container on `devnetng` that sends no credential. Here the gateway forwards whatever header it was given, so a headerless request served with the operator's token is exactly the identity leak the gateway is meant to prevent; this stays off. See [Forgejo MCP](#forgejo-mcp) |
 
 The admin UI also expects an htpasswd file at
-`data/agentgateway/agwadmins.htpasswd`. There is no template for it, so
+`installed/data/agentgateway/agwadmins.htpasswd`. There is no seed for it, so
 `scripts/setup.sh` cannot create it — make it by hand once:
 
 ```bash
-htpasswd -c data/agentgateway/agwadmins.htpasswd admin
+htpasswd -c installed/data/agentgateway/agwadmins.htpasswd admin
 ```
 
-The gateway configuration follows the same rule:
-`data/agentgateway/config.yaml.example` is the template and the generated
-`config.yaml` is gitignored.
+The gateway configuration follows the same rule: `skel/data/agentgateway/config.yaml`
+is the seed, and `installed/data/agentgateway/config.yaml` — the copy you edit — is
+what the container reads.
 
-That template carries the price catalog inline, under `config.modelCatalog`, as
+That seed carries the price catalog inline, under `config.modelCatalog`, as
 per-model rates (`input`, `output`, `cacheRead`). There is no bundled price list,
 so base prices have to be downloaded from the gateway's admin UI and kept up to
 date by hand. **When you add a model, add its rates there in the same commit.**
 Nothing fills them in for you. Missing rates are not fatal: the model still
 serves requests, it just logs no estimated price and stays out of the cost
-analysis view, so the estimates quietly run low. The same rates appear again in
-`clients/pi/models.json` — that copy is what a client shows you, and it goes
+analysis view, so the estimates quietly run low. A client may keep its own copy of
+those rates; that file lives with the client, outside this repository, and goes
 stale on its own.
 
 ### Virtual keys (LLM access)
 
-The LLM listener is keyed, and the template ships it **fail-closed**:
+The LLM listener is keyed, and the seed ships it **fail-closed**:
 `llm.policies.apiKey` is `mode: strict` with `keys: []`. Strict means a valid key
 must be present, and an empty list admits none, so a fresh stack refuses every
 `/v1` request with `401` until someone creates a key. `GET /v1/models` answering
 `401` is the listener working, not a fault.
 
-Keys are not in the template and are not edited by hand. They are created at
+Keys are not in the seed and are not edited by hand. They are created at
 runtime in the dashboard, which is why 38080 stays on loopback:
 
 1. Reach the UI over a tunnel — `ssh -N -L 38080:127.0.0.1:38080 <user>@<host>` —
    and open `http://127.0.0.1:38080`. Log in with the user from
-   `data/agentgateway/agwadmins.htpasswd`.
+   `installed/data/agentgateway/agwadmins.htpasswd`.
 2. LLM → Virtual API Keys → one key per development environment. The gateway keeps
    a hash, not the key, so the raw value is only visible when it is created.
    In the default file storage the keys are written into
-   `data/agentgateway/config.yaml`, which is gitignored; the committed template
-   keeps `keys: []`, so a fresh checkout still starts closed.
+   `installed/data/agentgateway/config.yaml`, which is gitignored; the seed keeps
+   `keys: []`, so a fresh checkout still starts closed.
 3. Give that key to the environment's client as a bearer token on
    `http://<host>:4000/v1`.
 
-`clients/pi/models.json` carries no `apiKey` for the `agentgateway` provider, so Pi
-takes the key from wherever you keep it: `~/.pi/agent/auth.json` via `/login`,
-`--api-key`, or the provider's environment variable. To pin it in that file
-instead, add one line beside `baseUrl` — Pi interpolates `$NAME` at request time:
+A client config is not part of this repository, but the rule it has to follow is:
+it carries the environment's *virtual* key, never a provider key. Pi takes it from
+wherever you keep it — `~/.pi/agent/auth.json` via `/login`, `--api-key`, or the
+provider's environment variable — and interpolates `$NAME` at request time, so
+pinning it in the config is one line beside `baseUrl`:
 
 ```json
 "apiKey": "$AGENTGATEWAY_VIRTUAL_KEY"
@@ -216,22 +222,19 @@ omitted — or to `permissive`, and never drop the `apiKey` policy: those admit
 requests with no key at all. And per key, `allowedModels` and `budgets` limit which
 models an environment may call and what it may spend; a budget needs
 `metadata.name` on the key and `config.database.url` in this file, which the
-template already sets.
+seed already sets.
 
 ## Install
 
-Quadlets reference `%h/Containers/devinfra` (systemd expands `%h` to your home
-directory), so this repository is expected to live — or be symlinked — at
-`~/Containers/devinfra`. `scripts/link-quadlets.sh` compares the two and warns
-when they disagree:
+The checkout can live anywhere. `scripts/setup.sh` substitutes this tree's
+absolute path for `@REPO_ROOT@` in the units while seeding, so
+`EnvironmentFile=`, `Volume=` and `SetWorkingDirectory=` name real directories
+wherever you cloned it — no symlink, and no assumption about your home directory.
+Moving the tree afterwards means re-seeding: `rm -rf installed/ &&
+./scripts/setup.sh`.
 
-```bash
-mkdir -p ~/Containers
-ln -s "$PWD" ~/Containers/devinfra
-```
-
-Rebuild the ignored tree, fetch the build inputs and link the units into the
-rootless Quadlet search path (`$XDG_CONFIG_HOME/containers/systemd`, default
+Seed `installed/`, fetch the build inputs and link the units into the rootless
+Quadlet search path (`$XDG_CONFIG_HOME/containers/systemd`, default
 `~/.config/containers/systemd`):
 
 ```bash
@@ -241,9 +244,10 @@ systemctl --user daemon-reload
 
 `install.sh` runs the three steps in `scripts/` in order:
 `scripts/pre-setup.sh` fetches the forgejo-mcp release bundles,
-`scripts/setup.sh` rebuilds the ignored tree, and `scripts/link-quadlets.sh`
-links the units. Run them individually when only one is needed — none of them
-minds being called twice, and `install.sh` only stops early when a step fails.
+`scripts/setup.sh` seeds `installed/` from `skel/`, and
+`scripts/link-quadlets.sh` links `installed/quadlets/`. Run them individually when
+only one is needed — none of them minds being called twice, and `install.sh` only
+stops early when a step fails.
 
 `scripts/pre-setup.sh` is the only step that needs the network, and only for the
 `forgejomcp` image: it downloads the releases that image is built from and
@@ -251,7 +255,11 @@ verifies each against a pinned sha256. Re-running it is free — a bundle alread
 present is skipped — so it can sit in a deploy script unconditionally.
 
 `scripts/setup.sh` needs no container runtime — it only creates directories and
-copies templates (never overwriting an existing file).
+copies seeds, and it never overwrites an existing file. That is deliberate:
+`installed/` is where this machine's decisions live, and the consequence is that a
+`git pull` changes `skel/` and does not reach `installed/`. The run ends with a
+`differs` line for every seed that disagrees with the install; `diff -rq skel/
+installed/` shows what would change, and the merge is yours.
 
 ## Start, stop, boot
 
@@ -285,38 +293,10 @@ throwaway host is not turned into a permanent one by trying it out.
 
 Images defined by a `.build` unit are built on first start. `forgejomcp` is the
 one unit that can look broken while the rest works: it dials `FORGEJO_URL` at
-startup and exits when it cannot reach it, so under the shipped template it
+startup and exits when it cannot reach it, so under the shipped seed it
 restarts every 30 seconds instead of serving. Fill in `FORGEJO_URL` and
 `FORGEJO_ACCESS_TOKEN` first; nothing else depends on it, so the rest of the
 stack is unaffected.
-
-## Clients
-
-`clients/pi/` holds the three config files a Pi client needs, with the endpoints
-already pointed at loopback:
-
-| File | Goes to | What to change |
-|---|---|---|
-| `models.json` | `~/.pi/agent/models.json` | the provider's virtual key, if you want it in this file rather than `auth.json` — see [Virtual keys](#virtual-keys-llm-access); otherwise nothing, unless the models or their rates change |
-| `mcp.json` | `~/.pi/agent/mcp.json` | the two `DOWNSTREAM_*` `Bearer <…>` placeholders, plus your own Forgejo token on the `forgejo` entry |
-| `web-search.json` | `~/.pi/agent/web-search.json` | `deepseekApiKey` → `DOWNSTREAM_DEEPSEEK_SEARCH_TOKEN` |
-
-`scripts/setup.sh` also copies them to the same directory without the `.example`
-suffix, so the tree always has a fill-in-the-blank copy next to the template.
-They are the client half of the shared-stack story: the provider keys and the
-GitHub PAT stay on this host, and a client only ever holds a gateway token — with
-one deliberate exception, the `forgejo` entry, whose token is the client's own
-Forgejo token because that route exists to give each environment its own Forgejo
-identity (see [Forgejo MCP](#forgejo-mcp)).
-
-Two endpoints are *not* on the gateway — PostgreSQL and Valkey — because they are
-protocol servers rather than HTTP and each client connects to them directly. Same
-loopback/tunnel rule applies.
-
-The one thing these templates cannot do for you is point at a host other than
-`127.0.0.1`. That default works for a co-located stack and for a tunnel; a client
-on a private network replaces `127.0.0.1` with the address it reaches. Keep the
-port numbers: they are what the gateway and the MCP servers expect.
 
 ## Reaching the stack from another machine
 
@@ -345,13 +325,16 @@ How to reach 4000, in ascending order of trust:
    Every MCP server comes with the 4000 forward, Forgejo included, and 38080
    rides along for provisioning keys from the dashboard.
 
-2. **Private network** (WireGuard, Tailscale, a lab VLAN) — change the
-   `PublishPort=` lines to bind the interface those networks use, e.g.
-   `PublishPort=<that-ip>:4000:4000/tcp`, then `systemctl --user daemon-reload`
-   and restart the unit. Clients then use `http://<that-ip>:4000` and need no
-   tunnel. The address is a property of the host, not of this repository, which
-   is why it is an edit rather than a setting. Leave the 38080 lines on loopback
-   and tunnel to the dashboard when you need to create or revoke a key.
+2. **Private network** (WireGuard, Tailscale, a lab VLAN) — edit the
+   `PublishPort=` lines in `installed/quadlets/` to bind the interface those
+   networks use, e.g. `PublishPort=<that-ip>:4000:4000/tcp`, then `systemctl --user
+   daemon-reload` and restart the unit. This is a deployment edit, and it is why
+   `installed/quadlets/` exists: the tracked `skel/quadlets/` stays on loopback as
+   the reviewed default, so a pull never undoes it. Clients then use
+   `http://<that-ip>:4000` and need no tunnel. The address is a property of the
+   host, not of this repository, which is why it is an edit rather than a setting.
+   Leave the 38080 lines on loopback and tunnel to the dashboard when you need to
+   create or revoke a key.
 
 3. **A LAN address** — possible, and the same edit, but understand what is being
    published: a key-gated LLM API backed by your provider keys (safe only while
@@ -363,7 +346,7 @@ How to reach 4000, in ascending order of trust:
 What must not be published in any shape is the Playwright port: it has no
 authentication of its own, and `--allowed-hosts "*"`. That is why the stack
 serves it through the gateway's `/mcp/playwright` route instead, with a bearer
-token, and why `quadlets/playwrightmcp.container` has no `PublishPort=`.
+token, and why `skel/quadlets/playwrightmcp.container` has no `PublishPort=`.
 
 ### Forgejo MCP
 
@@ -392,8 +375,8 @@ forwards whatever header it was given, so a headerless request would be served
 as the operator — the one identity the gateway exists to keep away from clients.
 
 `FORGEJO_MCP_ALLOWED_HOSTS` still governs whether the server answers at all. The
-gateway sends the backend's own name, `systemd-forgejomcp:8080`, which the
-template declares; an entry there without a port matches any port. A name missing
+gateway sends the backend's own name, `systemd-forgejomcp:8080`, which the seed
+declares; an entry there without a port matches any port. A name missing
 from the list is a `403` on every request, and the server logs the `Host` it
 refused, so the fix names itself. That check is also the reason to look at this
 list, not at the gateway, when `/mcp/forgejo` answers 403.
@@ -461,22 +444,23 @@ systemd-agentgateway` before suspecting the browser container.
 | `Network 'systemd-devnetng' does not exist` | Start/reload the network unit: `systemctl --user daemon-reload && systemctl --user start devnetng-network` |
 | Quadlet unit name is `systemd-<name>` | Podman Quadlet prefixes container names; use `systemd-agentgateway`, not `agentgateway`, as a hostname |
 | `Unit ... not found` after adding a unit | Re-run `./scripts/link-quadlets.sh` and `systemctl --user daemon-reload` |
-| A unit silently fails to generate | Unsupported key in the unit, or an `Image=`/`Network=` naming a quadlet that is not in `quadlets/`; the generator refuses to translate a missing dependency |
-| Volumes point at an empty directory | The checkout is not at `~/Containers/devinfra`; `scripts/link-quadlets.sh` warns about this |
-| Gateway returns 401 | `DOWNSTREAM_*_TOKEN` mismatch between client and `agentgateway.env` |
+| A unit silently fails to generate | Unsupported key in the unit, or an `Image=`/`Network=` naming a quadlet that is not in `installed/quadlets/`; the generator refuses to translate a missing dependency |
+| Volumes point at an empty directory, or at a path that does not exist | `installed/` was never seeded, or the tree moved after seeding; re-run `./scripts/setup.sh` and read its `differs` lines |
+| Gateway returns 401 | `DOWNSTREAM_*_TOKEN` mismatch between the client and `installed/envars/agentgateway.env` |
 | Gateway returns 403/404 on `/mcp/playwright` | The route did not load — check the gateway log for a config error; the whole gateway fails rather than one route |
-| `systemd-forgejomcp` restarts every 30s | `envars/forgejomcp.env` still holds a template placeholder, or `FORGEJO_URL` is unreachable from the container. Check `podman logs systemd-forgejomcp`; the unit exits rather than serving when it cannot reach Forgejo |
+| `systemd-forgejomcp` restarts every 30s | `installed/envars/forgejomcp.env` still holds a seed placeholder, or `FORGEJO_URL` is unreachable from the container. Check `podman logs systemd-forgejomcp`; the unit exits rather than serving when it cannot reach Forgejo |
 | Forgejo MCP returns 403 | The `Host` header the gateway sends (`systemd-forgejomcp:8080`) is not in `FORGEJO_MCP_ALLOWED_HOSTS`; entries match by host with no wildcard, and a 403 logs the header it refused |
 | Forgejo MCP returns 401 | `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0` and the request carried no `Authorization` header — that is the intended answer, send your own token |
 | Unit starts at boot but nothing answers | The user manager is not lingering: `loginctl enable-linger $USER` |
-| Screenshots not visible on this host | They are written to `data/playwrightmcp/` on the *infrastructure* host, owned by a mapped subuid; copy them across, they are world-readable |
+| Screenshots not visible on this host | They are written to `installed/data/playwrightmcp/` on the *infrastructure* host, owned by a mapped subuid; copy them across, they are world-readable |
 
 `TODO:` add log locations and a reset procedure.
 
 ## Security notes
 
-- `data/`, `envars/` and `clients/` are gitignored apart from `*.example`
-  templates, so no tracked file ever holds a secret.
+- `installed/` is gitignored as a whole, so no tracked file holds a secret: the
+  units systemd loads, the env files with real keys and the container state all
+  live there. `skel/` is tracked, ships placeholders only, and seeds that tree.
 - Every published port is on loopback by default, and 38080 stays on loopback:
   it can mint virtual keys and rewrite routes, and HTTP basic auth is all it has.
 - The LLM listener is fail-closed, not open: `mode: strict` with an empty key list
@@ -498,8 +482,9 @@ systemd-agentgateway` before suspecting the browser container.
   drive a browser with whatever credentials that browser can hold, and the
   container runs with `--allowed-hosts "*"`. It is served over the gateway so a
   client outside the network needs a bearer token to get there.
-- Env files created by `scripts/setup.sh` are chmod `600`, since they are where
-  the API keys and proxy tokens end up.
+- Env files created by `scripts/setup.sh` under `installed/envars/` are chmod
+  `600`, since they are where the API keys and proxy tokens end up. The tracked
+  seeds next to them are placeholders and hold no credential.
 - Both stacks on one host is not a supported layout: the unit names, the network
   name and the loopback ports would collide. Run one.
 
@@ -513,9 +498,10 @@ systemd-agentgateway` before suspecting the browser container.
       to arrive in a header of its own (checked by `authorization`, then removed
       by `requestHeaderModifier`), because `Authorization` on that route belongs
       to the client's Forgejo identity
-- [ ] Per-host overrides — today a private-network bind means editing the unit
+- [x] Per-host overrides — `installed/quadlets/`, `installed/envars/` and
+      `installed/data/` are this host's, and a pull never overwrites them
 - [ ] `Makefile` / `justfile` for build, install and teardown
 - [ ] Validate envars before starting units
 - [ ] Health checks for postgres/valkey/gateway
 - [ ] Document the agent gateway routes and policies in detail
-- [ ] Add backups for `data/postgres`
+- [ ] Add backups for `installed/data/postgres`
