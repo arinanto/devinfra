@@ -177,15 +177,25 @@ routes:
   # GET and DELETE -- and no trailing slash on the rewrite because that path is
   # registered exactly.
   #
-  # No authorization policy on this route, and that is deliberate rather than an
-  # omission. forgejo-mcp authenticates every request with the Authorization
-  # header it is given and forwards that token to Forgejo, so the bearer here is
-  # the client's OWN Forgejo token -- one identity per development environment,
-  # which a single shared DOWNSTREAM_* value cannot express. A `require` on that
-  # header would have to match one fixed token and would break exactly that.
-  # Adding one is therefore not a hardening step: it either replaces per-client
-  # identity with the operator's (FORGEJO_ACCESS_TOKEN) or it locks every client
-  # out. A request without a token is refused by forgejo-mcp itself.
+  # The bearer is a surrogate, like every other route's: a client presents
+  # DOWNSTREAM_FORGEJO_MCP_TOKEN and the gateway replaces it with the real
+  # FORGEJO_ACCESS_TOKEN before the request reaches forgejo-mcp, which forwards
+  # that token to Forgejo. No client config ever holds a Forgejo credential, and
+  # `set` rather than `add` means a client cannot pass one through untouched
+  # either.
+  #
+  # What that costs is identity. Every environment writing through this route
+  # writes as the one Forgejo user FORGEJO_ACCESS_TOKEN belongs to, and Forgejo's
+  # audit log cannot tell the environments apart. One identity per environment
+  # would need one route, one DOWNSTREAM_* token and one Forgejo token per
+  # environment in this file; a single shared static config cannot express it
+  # otherwise, so the trade is made once here rather than per deployment.
+  #
+  # FORGEJO_ACCESS_TOKEN is a gateway credential like GITHUB_MCP_PAT: it lives in
+  # skel/envars/agentgateway.env, next to that and the provider keys, and nowhere
+  # else. The Forgejo MCP server behind this route holds no credential of its own
+  # and does not need one, so the header set here is the only one that ever
+  # reaches it.
   - gateways: agent
     matches:
       - path:
@@ -194,6 +204,14 @@ routes:
       - host: systemd-forgejomcp:8080
     name: forgejo-mcp-proxy
     policies:
+      authorization:
+        rules:
+          - require: |-
+              "authorization" in request.headers &&
+              request.headers.authorization == "Bearer $DOWNSTREAM_FORGEJO_MCP_TOKEN"
+      requestHeaderModifier:
+        set:
+          authorization: Bearer $FORGEJO_ACCESS_TOKEN
       urlRewrite:
         path:
           full: /mcp

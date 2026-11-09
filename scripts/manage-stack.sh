@@ -129,7 +129,7 @@ on this host (loopback):
   Gateway API         http://127.0.0.1:4000/v1        (LLM, needs a virtual key: mode strict)
   GitHub MCP proxy    http://127.0.0.1:4000/mcp/github   (Bearer DOWNSTREAM_GITHUB_MCP_TOKEN)
   Playwright MCP      http://127.0.0.1:4000/mcp/playwright (Bearer DOWNSTREAM_PLAYWRIGHT_MCP_TOKEN)
-  Forgejo MCP         http://127.0.0.1:4000/mcp/forgejo  (Bearer <your own Forgejo token>)
+  Forgejo MCP         http://127.0.0.1:4000/mcp/forgejo  (Bearer DOWNSTREAM_FORGEJO_MCP_TOKEN)
 
 on devnetng, container to container only (not published):
   Postgres  systemd-postgres:5432      Valkey  systemd-valkey:6379

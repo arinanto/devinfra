@@ -82,11 +82,13 @@ USER 10001:10001
 #
 #   FORGEJO_MCP_ALLOWED_HOSTS=systemd-forgejomcp,localhost,127.0.0.1
 #
-# FORGEJO_URL and FORGEJO_ACCESS_TOKEN are required all the same. On sse/http
-# every request must carry its own Authorization header unless
-# --allow-operator-token-fallback is passed, which hands the operator's Forgejo
-# credential to anyone who can reach the port -- see README.md upstream before
-# turning it on.
+# FORGEJO_URL is required: it is dialed at startup and the server exits non-zero
+# if it cannot be reached. FORGEJO_ACCESS_TOKEN is not -- 3.4.0 starts and serves
+# with none of its own (`token_configured: false` in its log), because on sse/http
+# every request must carry its own Authorization header. It is only needed for
+# --allow-operator-token-fallback, which serves a headerless request with that
+# token and so hands the operator's Forgejo credential to anyone who can reach
+# the port -- see README.md upstream before turning it on.
 #
 # No HEALTHCHECK: /mcp answers a GET only with a stream, and a POST only with an
 # MCP handshake; both need the caller's Authorization header. What is left is a

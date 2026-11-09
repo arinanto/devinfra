@@ -97,16 +97,25 @@ manages the units afterwards:
      authentication and runs with `--allowed-hosts "*"`; it is served through the
      gateway's `/mcp/playwright` route instead;
    - `forgejomcp.container` publishes nothing, and is served through the
-     gateway's `/mcp/forgejo` route. That route has no `authorization` policy on
-     purpose: `forgejo-mcp` reads `Authorization` and forwards it to Forgejo, so
-     the bearer there is the client's own Forgejo token and one-per-environment
-     identity is the point. A `require` on that header would need one fixed
-     token, and the only fixed one available is the operator's
-     (`FORGEJO_ACCESS_TOKEN`) — which is why
-     `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0` stays: fallback on plus a
-     gateway that forwards whatever header it was given serves headerless
-     requests as the operator. devstack has fallback on and no gateway, which is
-     the same rule from the other side.
+     gateway's `/mcp/forgejo` route. That route now works like the others: it
+     requires a surrogate `DOWNSTREAM_FORGEJO_MCP_TOKEN` and `set`s
+     `Authorization` to the real `FORGEJO_ACCESS_TOKEN`, which `forgejo-mcp`
+     forwards to Forgejo. **No client config may hold a real Forgejo token**, and
+     `set` rather than `add` is what stops a client passing one through anyway.
+     The cost is one identity: every environment writes as that token's Forgejo
+     user, and Forgejo's audit log cannot separate them. Per-environment identity
+     would need one route plus one token per environment, which a shared static
+     config cannot express; do not "restore" the older shape where the client's
+     own Forgejo token is forwarded, because that puts a real credential in a
+     client's file. `FORGEJO_ACCESS_TOKEN` is a gateway credential like
+     `GITHUB_MCP_PAT`: it lives in `skel/envars/agentgateway.env` and nowhere
+     else. The Forgejo MCP server runs with no token of its own — verified
+     against release 3.4.0, it starts and serves with `token_configured: false`
+     — so do not add one to `skel/envars/forgejomcp.env` "because it is required":
+     it is not, and a second copy is one more place for the secret to live.
+     `FORGEJO_MCP_ALLOW_OPERATOR_TOKEN_FALLBACK=0` stays as the second lock for the
+     direct `devnetng` path. devstack has fallback on and no gateway, which is the
+     same rule from the other side.
 
    Widening a port is a deployment decision, not a change to this repository: the
    tracked `skel/quadlets/` is the reviewed default and stays loopback, while
@@ -204,10 +213,12 @@ install is never overwritten and so has to gain the line by hand. Mirror an
 existing route rather than inventing a shape: `pathPrefix`
 + `urlRewrite.full: /mcp/` for streamable HTTP (see `playwright-mcp-proxy`), which
 unlike the GitHub route has no `method:` because streamable HTTP also uses GET and
-DELETE. `forgejo-mcp-proxy`
-is the one route with **no** token and **no** `authorization` policy: its
-`Authorization` header belongs to the client's Forgejo identity and is forwarded
-verbatim, so do not add a `DOWNSTREAM_*` check there — see invariant 5.
+DELETE. `forgejo-mcp-proxy` follows that shape with one thing worth copying: its
+rewrite is `full: /mcp` with no trailing slash, because that path is registered
+exactly. It requires its own `DOWNSTREAM_FORGEJO_MCP_TOKEN` and presents
+`FORGEJO_ACCESS_TOKEN` like the routes above — its only real difference is that
+the Forgejo server behind it holds no credential of its own, so the header the
+gateway sets is the only one that ever reaches it. See invariant 5.
 
 **Change a port** — three places move together for the default: the unit in
 `skel/quadlets/`, the README port table, and the endpoint block in
